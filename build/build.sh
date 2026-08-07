@@ -95,7 +95,6 @@ chroot "$CHROOT_DIR" apt-get install -y --no-install-recommends \
     curl \
     wget \
     sudo \
-    user-setup \
     policykit-1 \
     gvfs \
     gvfs-backends \
