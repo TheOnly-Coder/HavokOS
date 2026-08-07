@@ -35,8 +35,8 @@ echo "[2/8] Configuring system..."
 # Basic config
 echo "havokos" > "$CHROOT_DIR/etc/hostname"
 cat > "$CHROOT_DIR/etc/hosts" << 'HOSTS'
-127.0.0.1	havokos localhost
-::1		localhost ip6-localhost ip6-loopback
+127.0.0.1       havokos localhost
+::1             localhost ip6-localhost ip6-loopback
 HOSTS
 
 # Apt sources (include contrib for firmware if needed)
@@ -80,7 +80,6 @@ chroot "$CHROOT_DIR" apt-get install -y --no-install-recommends \
     gir1.2-gtk-3.0 \
     gir1.2-webkit2-4.1 \
     gir1.2-vte-2.91 \
-    gtk3-engines-oxygen \
     dbus-x11 \
     lightdm \
     lightdm-gtk-greeter \
