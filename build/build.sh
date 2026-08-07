@@ -371,7 +371,10 @@ menuentry "HavokOS" {
 GRUB
 
 # Create the ISO
+# Simplified approach: BIOS boot via ISOLINUX, EFI via grub-mkrescue
+# Using xorriso with isohybrid for BIOS+EFI support
 echo "  Generating ISO (this may take a while)..."
+
 cd "$ISO_DIR"
 xorriso \
     -as mkisofs \
@@ -382,10 +385,6 @@ xorriso \
     -no-emul-boot \
     -boot-load-size 4 \
     -boot-info-table \
-    -eltorito-alt-boot \
-    -e '--interval:appended_partition_2_start_$(expr $(stat -c %s "$OUTPUT_DIR/HavokOS-1.0.0.iso") / 512 + 1)s:appended_part_2:0:' \
-    -no-emul-boot \
-    -partition_offset 16 \
     -V "HAVOKOS" \
     -J \
     -joliet-long \
