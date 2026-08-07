@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
@@ -20,12 +20,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             debootstrap squashfs-tools xorriso \
-            isolinux syslinux-common grub-pc-bin grub-efi-amd64-bin \
-            mtools dosfstools \
-            fakeroot
+            isolinux syslinux-common syslinux-utils \
+            grub-pc-bin grub-efi-amd64-bin \
+            mtools dosfstools fakeroot cpio
 
       - name: Build HavokOS ISO
         run: sudo bash build/build.sh
+
+      - name: Verify ISO exists
+        run: |
+          ls -lh output/HavokOS-*.iso
+          file output/HavokOS-*.iso
 
       - name: Upload ISO artifact
         uses: actions/upload-artifact@v4
@@ -34,29 +39,45 @@ jobs:
           path: output/HavokOS-*.iso
           retention-days: 7
 
+      - name: Delete old release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete v1.0.1 --yes --cleanup-tag 2>/dev/null || true
+          git push origin :refs/tags/v1.0.1 2>/dev/null || true
+
       - name: Create Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.0
-          name: HavokOS v1.0.0
+          tag_name: v1.0.1
+          name: HavokOS v1.0.1
           body: |
-            # HavokOS v1.0.0
+            # HavokOS v1.0.1
             
             A minimal Linux-based desktop OS with built-in HSL (Havok Scripting Library) support.
             
+            ## What's Fixed (v1.0.1)
+            - Fixed kernel panic on boot (initramfs unpacking failure)
+            - Switched to gzip compression for reliable initramfs
+            - Added live-boot-initramfs-tools for proper live CD support
+            - Added initramfs verification during build
+            
             ## Features
-            - Lightweight desktop environment
+            - Lightweight desktop environment (Openbox)
             - Havok Browser, Files, Text Editor, and Settings apps
             - HSL (.hsl) scripting for full customization
-            - HavokCustom folder for user extensions
-            - Runs on QEMU with TCG emulation
+            - HavokCustom folder on desktop for user extensions
+            - IMPORTANT subfolder with desktop/app HSL definitions
             
-            ## Usage
+            ## How to Run
             Download the ISO and run in QEMU:
             ```
             qemu-system-x86_64 -cdrom HavokOS-1.0.0.iso -m 1024 -accel tcg
             ```
+            
+            Make sure to allocate at least 1024MB RAM with `-m 1024`.
           files: output/HavokOS-*.iso
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
