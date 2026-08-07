@@ -1,0 +1,62 @@
+name: Build HavokOS ISO
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            debootstrap squashfs-tools xorriso \
+            isolinux syslinux-common grub-pc-bin grub-efi-amd64-bin \
+            mtools dosfstools \
+            fakeroot
+
+      - name: Build HavokOS ISO
+        run: sudo bash build/build.sh
+
+      - name: Upload ISO artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: havokos-iso
+          path: output/HavokOS-*.iso
+          retention-days: 7
+
+      - name: Create Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: HavokOS v1.0.0
+          body: |
+            # HavokOS v1.0.0
+            
+            A minimal Linux-based desktop OS with built-in HSL (Havok Scripting Library) support.
+            
+            ## Features
+            - Lightweight desktop environment
+            - Havok Browser, Files, Text Editor, and Settings apps
+            - HSL (.hsl) scripting for full customization
+            - HavokCustom folder for user extensions
+            - Runs on QEMU with TCG emulation
+            
+            ## Usage
+            Download the ISO and run in QEMU:
+            ```
+            qemu-system-x86_64 -cdrom HavokOS-1.0.0.iso -m 1024 -accel tcg
+            ```
+          files: output/HavokOS-*.iso
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,45 @@
+# app_files.hsl - Havok Files definition
+# Defines the file manager application
+
+app "Havok Files" {
+    type: "application"
+    width: 900
+    height: 600
+    title: "Havok Files"
+    background: "#1a1a2e"
+
+    container "sidebar" {
+        background: "#0f0f23"
+        width: 200
+
+        label "Places" {
+            text: "Places"
+            color: "#e94560"
+            font_size: 12
+        }
+
+        button "Home" {
+            on click {
+                shell("havok-files " + getenv("HOME"))
+            }
+        }
+
+        button "Desktop" {
+            on click {
+                shell("havok-files " + getenv("HOME") + "/Desktop")
+            }
+        }
+
+        button "HavokCustom" {
+            on click {
+                shell("havok-files " + getenv("HOME") + "/Desktop/HavokCustom")
+            }
+        }
+
+        button "Root" {
+            on click {
+                shell("havok-files /")
+            }
+        }
+    }
+}

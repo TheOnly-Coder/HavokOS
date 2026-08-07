@@ -1,0 +1,52 @@
+# app_browser.hsl - Havok Browser definition
+# Defines the built-in web browser
+
+app "Havok Browser" {
+    type: "application"
+    width: 1024
+    height: 700
+    title: "Havok Browser"
+    background: "#1a1a2e"
+    engine: "webkit2"
+
+    # Navigation bar
+    container "navbar" {
+        background: "#16213e"
+        height: 40
+
+        button "Back" {
+            icon: "back"
+            on click {
+                print("Browser: go back")
+            }
+        }
+
+        button "Forward" {
+            icon: "forward"
+            on click {
+                print("Browser: go forward")
+            }
+        }
+
+        button "Refresh" {
+            icon: "refresh"
+            on click {
+                print("Browser: reload")
+            }
+        }
+
+        button "Home" {
+            text: "Home"
+            on click {
+                shell("havok-browser")
+            }
+        }
+    }
+
+    # Default home page
+    label "HomeInfo" {
+        text: "Havok Browser v1.0"
+        color: "#e94560"
+        font_size: 18
+    }
+}

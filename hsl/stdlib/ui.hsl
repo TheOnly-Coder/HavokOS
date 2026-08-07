@@ -1,0 +1,25 @@
+# ui.hsl - HSL Standard UI Library
+# Provides common UI helper functions
+
+func create_window(title, width, height) {
+    print("Creating window: " + title + " (" + str(width) + "x" + str(height) + ")")
+    return title
+}
+
+func create_button(label, action) {
+    print("Button: " + label)
+    return label
+}
+
+func create_label(text, color) {
+    if color {
+        print("Label [" + color + "]: " + text)
+    } else {
+        print("Label: " + text)
+    }
+    return text
+}
+
+func notify(title, message) {
+    print("Notification: " + title + " - " + message)
+}

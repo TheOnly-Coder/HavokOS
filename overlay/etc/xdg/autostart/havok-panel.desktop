@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=HavokOS Panel
+Exec=havok-panel
+Terminal=false
+Type=Application
+X-GNOME-Autostart-enabled=true

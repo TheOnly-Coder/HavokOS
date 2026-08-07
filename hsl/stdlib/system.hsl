@@ -1,0 +1,30 @@
+# system.hsl - HSL System Library
+# Provides system-level helper functions
+
+func get_username() {
+    return getenv("USER")
+}
+
+func get_hostname() {
+    return shell("hostname")
+}
+
+func get_home() {
+    return getenv("HOME")
+}
+
+func uptime() {
+    return shell("uptime -p")
+}
+
+func disk_usage(path) {
+    return shell("df -h " + path)
+}
+
+func memory_info() {
+    return shell("free -h")
+}
+
+func list_processes() {
+    return shell("ps aux")
+}

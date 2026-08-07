@@ -1,0 +1,23 @@
+# desktop.hsl - Main desktop surface definition
+# This HSL file defines the HavokOS desktop
+
+# Desktop surface
+app "HavokOS Desktop" {
+    type: "desktop_surface"
+    width: 1920
+    height: 1080
+    background: "#1a1a2e"
+
+    # Welcome text widget
+    label "Welcome to HavokOS" {
+        text: "Welcome to HavokOS"
+        font_size: 14
+        color: "#e94560"
+    }
+
+    label "Version" {
+        text: "v1.0.0"
+        font_size: 10
+        color: "#666666"
+    }
+}

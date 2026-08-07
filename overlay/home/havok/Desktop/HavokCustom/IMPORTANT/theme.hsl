@@ -1,0 +1,35 @@
+# theme.hsl - Visual theme definition for HavokOS
+# Controls colors, fonts, and overall visual style
+
+app "HavokOS Theme" {
+    type: "theme"
+    name: "HavokOS Dark"
+
+    # Core colors
+    background: "#1a1a2e"
+    panel_background: "#0a0a1a"
+    sidebar_background: "#0f0f23"
+    surface_background: "#16213e"
+
+    # Text colors
+    text_primary: "#e0e0e0"
+    text_secondary: "#888888"
+    text_disabled: "#555555"
+
+    # Accent colors
+    accent: "#e94560"
+    accent_hover: "#c73652"
+    accent_secondary: "#0f3460"
+    success: "#00b894"
+    warning: "#fdcb6e"
+
+    # Font
+    font_family: "DejaVu Sans"
+    font_size: 11
+    font_mono: "DejaVu Sans Mono"
+
+    # Border radius
+    radius_small: 4
+    radius_medium: 6
+    radius_large: 10
+}

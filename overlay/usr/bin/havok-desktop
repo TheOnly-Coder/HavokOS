@@ -1,0 +1,251 @@
+#!/usr/bin/env python3
+"""
+HavokOS Desktop Shell
+Loads HSL files from ~/Desktop/HavokCustom/ and renders the desktop.
+"""
+import os, sys, signal, gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('Gdk', '3.0')
+from gi.repository import Gtk, Gdk, GLib, GObject
+
+sys.path.insert(0, '/usr/share/havok/hsl')
+try:
+    from interpreter import HSLInterpreter
+    HAS_HSL = True
+except:
+    HAS_HSL = False
+
+DESKTOP_DIR = os.path.expanduser('~/Desktop')
+CUSTOM_DIR = os.path.join(DESKTOP_DIR, 'HavokCustom')
+IMPORTANT_DIR = os.path.join(CUSTOM_DIR, 'IMPORTANT')
+
+class HavokDesktop(Gtk.Window):
+    def __init__(self):
+        super().__init__(title='HavokOS Desktop')
+        self.set_type_hint(Gdk.WindowTypeHint.DESKTOP)
+        self.set_decorated(False)
+        self.set_size_request(1920, 1080)
+        self.move(0, 0)
+
+        # Main container
+        self.overlay = Gtk.Overlay()
+        self.add(self.overlay)
+
+        # Background
+        self.bg_color = '#1a1a2e'
+        self.bg = Gtk.EventBox()
+        self.bg.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0.102, 0.102, 0.180, 1.0))
+        self.overlay.add(self.bg)
+
+        # Desktop icons container
+        self.icon_box = Gtk.Fixed()
+        self.icon_box.set_halign(Gtk.Align.START)
+        self.icon_box.set_valign(Gtk.Align.START)
+        self.overlay.add_overlay(self.icon_box)
+
+        # Desktop icon positions
+        self.icon_y = 20
+        self.icons = []
+
+        # Load HSL files
+        self.hsl_widgets = []
+        self._load_hsl()
+
+        # Create default desktop icons
+        self._create_desktop_icons()
+
+        # HSL reload signal
+        signal.signal(signal.SIGUSR1, self._on_reload_signal)
+
+        self.connect('destroy', Gtk.main_quit)
+        self.connect('button-press-event', self._on_bg_click)
+        self.connect('size-allocate', self._on_resize)
+        self.show_all()
+
+    def _on_resize(self, widget, alloc):
+        screen = Gdk.Screen.get_default()
+        self.set_size_request(screen.get_width(), screen.get_height())
+
+    def _on_bg_click(self, widget, event):
+        if event.button == 3:
+            menu = Gtk.Menu()
+            items = [
+                ('Open Terminal', lambda m: self._launch('lxterminal')),
+                ('Havok Browser', lambda m: self._launch('havok-browser')),
+                ('Havok Files', lambda m: self._launch('havok-files')),
+                ('Havok Editor', lambda m: self._launch('havok-editor')),
+                ('Havok Settings', lambda m: self._launch('havok-settings')),
+                ('', None),
+                ('Reload HSL Extensions', lambda m: self._reload_hsl()),
+                ('About HavokOS', lambda m: self._show_about()),
+            ]
+            for label, cb in items:
+                if label == '':
+                    mi = Gtk.SeparatorMenuItem()
+                else:
+                    mi = Gtk.MenuItem(label=label)
+                    if cb: mi.connect('activate', cb)
+                menu.append(mi)
+            menu.show_all()
+            menu.popup_at_pointer(None)
+
+    def _on_reload_signal(self, signum, frame):
+        GLib.idle_add(self._reload_hsl)
+
+    def _reload_hsl(self):
+        # Remove old HSL widgets
+        for w in self.hsl_widgets:
+            w.destroy()
+        self.hsl_widgets.clear()
+        self.hsl_widget_tree = []
+        self._load_hsl()
+        print('[Desktop] HSL extensions reloaded')
+
+    def _load_hsl(self):
+        if not HAS_HSL:
+            print('[Desktop] HSL interpreter not available')
+            return
+        interp = HSLInterpreter()
+        # Load IMPORTANT system files first
+        if os.path.isdir(IMPORTANT_DIR):
+            print(f'[Desktop] Loading system HSL from {IMPORTANT_DIR}')
+            interp.run_directory(IMPORTANT_DIR)
+        # Load user custom files
+        user_files = os.path.join(CUSTOM_DIR, '*.hsl')
+        import glob as g
+        for f in sorted(g.glob(user_files)):
+            if '/IMPORTANT/' in f:
+                continue
+            print(f'[Desktop] Loading user HSL: {f}')
+            try:
+                interp.run_file(f)
+            except Exception as e:
+                print(f'[Desktop] Error loading {f}: {e}')
+        # Render widget tree
+        self._render_hsl_widgets(interp.global_env.widget_tree)
+
+    def _render_hsl_widgets(self, widgets):
+        for w in widgets:
+            widget = self._create_widget_from_hsl(w)
+            if widget:
+                self.icon_box.put(widget, w.get('x', 20), w.get('y', self.icon_y))
+                self.hsl_widgets.append(widget)
+                self.icon_y += 80
+
+    def _create_widget_from_hsl(self, desc):
+        wtype = desc.get('type', 'label')
+        label = desc.get('label', desc.get('args', {}).get('text', ''))
+        args = desc.get('args', {})
+
+        if wtype in ('label', 'text'):
+            lbl = Gtk.Label(label=label)
+            lbl.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(1, 1, 1, 1))
+            lbl.set_margin_start(10)
+            lbl.set_margin_top(5)
+            return lbl
+
+        elif wtype == 'button':
+            btn = Gtk.Button(label=label)
+            btn.set_size_request(int(args.get('width', 150)), int(args.get('height', 40)))
+            css_provider = Gtk.CssProvider()
+            css_provider.load_from_data(b'''button { background: #0f3460; color: white; border-radius: 5px; font-weight: bold; } button:hover { background: #16213e; }''')
+            btn.get_style_context().add_provider(css_provider, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+            color = args.get('color')
+            if color:
+                btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(color))
+            return btn
+
+        elif wtype == 'desktop_widget':
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=5)
+            frame = Gtk.Frame(label=label)
+            frame.set_size_request(int(args.get('width', 200)), int(args.get('height', 100)))
+            frame.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0.06, 0.06, 0.15, 0.8))
+            for child in desc.get('children', []):
+                cw = self._create_widget_from_hsl(child)
+                if cw: box.pack_start(cw, False, False, 5)
+            frame.add(box)
+            return frame
+
+        return None
+
+    def _create_desktop_icons(self):
+        icons = [
+            ('Havok Browser', 'havok-browser', '#e94560'),
+            ('Havok Files', 'havok-files', '#0f3460'),
+            ('Havok Editor', 'havok-editor', '#533483'),
+            ('Havok Settings', 'havok-settings', '#16213e'),
+            ('Terminal', 'lxterminal', '#333333'),
+            ('HavokCustom', 'havok-files ' + CUSTOM_DIR, '#e94560'),
+        ]
+        for name, cmd, color in icons:
+            btn = Gtk.Button()
+            btn.set_size_request(80, 80)
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            icon_lbl = Gtk.Label()
+            icon_lbl.set_markup(f'<span size="xx-large">{self._get_icon_emoji(name)}</span>')
+            icon_lbl.set_use_markup(True)
+            name_lbl = Gtk.Label(label=name)
+            name_lbl.set_max_width_chars(10)
+            name_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            name_lbl.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(1, 1, 1, 1))
+
+            box.pack_start(icon_lbl, False, False, 0)
+            box.pack_start(name_lbl, False, False, 0)
+            btn.add(box)
+
+            css = Gtk.CssProvider()
+            css.load_from_data(f'button {{ background: transparent; border: none; }} button:hover {{ background: {color}44; border-radius: 10px; }}'.encode())
+            btn.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+
+            x = 20
+            y = self.icon_y
+            btn.connect('button-press-event', self._on_icon_click, cmd)
+            if name == 'HavokCustom':
+                btn.connect('button-press-event', self._on_icon_click, 'havok-files ' + CUSTOM_DIR)
+            self.icon_box.put(btn, x, y)
+            self.icons.append(btn)
+            self.icon_y += 90
+
+    def _get_icon_emoji(self, name):
+        return {'Havok Browser': '🌐', 'Havok Files': '📁', 'Havok Editor': '📝',
+                'Havok Settings': '⚙', 'Terminal': '💻', 'HavokCustom': '🔧'}.get(name, '📄')
+
+    def _on_icon_click(self, widget, event, cmd):
+        if event.button == 1:  # double click simulated with single click
+            import subprocess
+            subprocess.Popen(cmd.split(), start_new_session=True)
+        elif event.button == 3:
+            menu = Gtk.Menu()
+            mi = Gtk.MenuItem(label='Open')
+            mi.connect('activate', lambda m: subprocess.Popen(cmd.split(), start_new_session=True))
+            menu.append(mi)
+            menu.show_all()
+            menu.popup_at_pointer(None)
+
+    def _launch(self, cmd):
+        import subprocess
+        subprocess.Popen(cmd.split(), start_new_session=True)
+
+    def _show_about(self):
+        dialog = Gtk.MessageDialog(
+            parent=self, modal=True, message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK,
+            title='About HavokOS')
+        dialog.set_markup('<b>HavokOS v1.0.0</b>\nA minimal Linux-based desktop OS\nwith HSL (Havok Scripting Library) customization.\n\nBuilt with Python, GTK3, and Openbox.')
+        dialog.run()
+        dialog.destroy()
+
+if __name__ == '__main__':
+    if '--reload' in sys.argv:
+        # Send reload signal to running desktop
+        import subprocess
+        subprocess.run(['pkill', '-USR1', '-f', 'havok-desktop'])
+        print('Reload signal sent to HavokOS Desktop')
+    else:
+        # Need Pango for ellipsize
+        gi.require_version('Pango', '1.0')
+        from gi.repository import Pango
+        desktop = HavokDesktop()
+        Gtk.main()

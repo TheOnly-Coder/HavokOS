@@ -1,0 +1,393 @@
+#!/usr/bin/env python3
+"""
+Havok Files - A minimal file manager for HavokOS.
+"""
+import os, sys, subprocess, gi, mimetypes
+from pathlib import Path
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk, GLib, Pango, Gio
+
+BG_COLOR = '#1a1a2e'
+SIDEBAR_COLOR = '#0f0f23'
+TEXT_COLOR = '#e0e0e0'
+ACCENT = '#e94560'
+ICON_MAP = {
+    '.hsl': '🔧', '.txt': '📄', '.py': '🐍', '.sh': '⚡',
+    '.md': '📋', '.json': '📊', '.xml': '📰', '.html': '🌐',
+    '.css': '🎨', '.js': '⚡', '.png': '🖼', '.jpg': '🖼',
+    '.jpeg': '🖼', '.gif': '🖼', '.svg': '🖼', '.pdf': '📕',
+    '.zip': '📦', '.tar': '📦', '.gz': '📦', '.iso': '💿',
+    '.desktop': '⚙', '.cfg': '⚙', '.conf': '⚙',
+}
+
+class HavokFiles(Gtk.Window):
+    def __init__(self, initial_path=None):
+        super().__init__(title='Havok Files')
+        self.set_default_size(900, 600)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.current_path = Path(initial_path) if initial_path else Path.home()
+        self.clipboard = None  # (action, path)
+        self.show_hidden = False
+
+        # Main horizontal pane
+        self.pane = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.pane.set_position(200)
+        self.add(self.pane)
+
+        # Sidebar with bookmarks
+        self.sidebar = self._create_sidebar()
+        self.pane.pack1(self.sidebar, False, False)
+
+        # Content area
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.pane.pack2(content_box, True, True)
+
+        # Toolbar
+        self.toolbar = self._create_toolbar()
+        content_box.pack_start(self.toolbar, False, False, 0)
+
+        # Breadcrumb / path bar
+        self.path_bar = self._create_path_bar()
+        content_box.pack_start(self.path_bar, False, False, 0)
+
+        # File list (IconView)
+        self.list_store = Gtk.ListStore(str, str, str, str, bool)  # name, path, icon, size_str, is_dir
+        self.icon_view = Gtk.IconView.new_with_model(self.list_store)
+        self.icon_view.set_text_column(0)
+        self.icon_view.set_item_width(100)
+        self.icon_view.set_columns(-1)
+        self.icon_view.set_spacing(10)
+        self.icon_view.set_margin(10)
+        self.icon_view.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
+        self.icon_view.connect('item-activated', self._on_item_activated)
+        self.icon_view.connect('button-press-event', self._on_button_press)
+
+        # Style icon view
+        css = Gtk.CssProvider()
+        css.load_from_data(b'''GtkIconView { background: #1a1a2e; color: #e0e0e0; } GtkIconView:selected { background: #0f3460; border-radius: 5px; }''')
+        self.icon_view.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.add(self.icon_view)
+        content_box.pack_start(scrolled, True, True, 0)
+
+        # Status bar
+        self.status_bar = Gtk.Label()
+        self.status_bar.set_margin_start(10)
+        self.status_bar.set_margin_bottom(4)
+        self.status_bar.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#888'))
+        content_box.pack_start(self.status_bar, False, False, 0)
+
+        self.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(BG_COLOR))
+        self.show_all()
+        self._navigate(self.current_path)
+
+    def _create_sidebar(self):
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(SIDEBAR_COLOR))
+        sidebar.set_size_request(200, -1)
+
+        # Title
+        title = Gtk.Label(label='  Places')
+        title.set_halign(Gtk.Align.START)
+        title.set_margin_top(10)
+        title.set_margin_bottom(5)
+        title.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(ACCENT))
+        title.set_attributes(self._bold_font(12))
+        sidebar.pack_start(title, False, False, 0)
+
+        # Bookmarks
+        bookmarks = [
+            ('🏠  Home', str(Path.home())),
+            ('🖥  Desktop', str(Path.home() / 'Desktop')),
+            ('📄  Documents', str(Path.home() / 'Documents')),
+            ('📥  Downloads', str(Path.home() / 'Downloads')),
+            ('🔧  HavokCustom', str(Path.home() / 'Desktop' / 'HavokCustom')),
+            ('📁  File System', '/'),
+        ]
+        for label, path in bookmarks:
+            btn = Gtk.Button(label=label)
+            btn.set_halign(Gtk.Align.START)
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.set_margin_start(10)
+            btn.set_margin_end(10)
+            btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+            css = Gtk.CssProvider()
+            css.load_from_data(b'button { background: transparent; border: none; padding: 6px; } button:hover { background: #ffffff11; border-radius: 4px; }')
+            btn.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+            btn.connect('clicked', lambda w, p=path: self._navigate(Path(p)))
+            sidebar.pack_start(btn, False, False, 0)
+
+        sidebar.pack_start(Gtk.Separator(), False, False, 10)
+
+        # Devices label
+        dev_title = Gtk.Label(label='  Devices')
+        dev_title.set_halign(Gtk.Align.START)
+        dev_title.set_margin_top(5)
+        dev_title.set_margin_bottom(5)
+        dev_title.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(ACCENT))
+        dev_title.set_attributes(self._bold_font(12))
+        sidebar.pack_start(dev_title, False, False, 0)
+
+        return sidebar
+
+    def _create_toolbar(self):
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        toolbar.set_margin_start(8)
+        toolbar.set_margin_end(8)
+        toolbar.set_margin_top(5)
+
+        btn_data = [
+            ('<', self._go_back), ('>', self._go_forward), ('↑', self._go_up),
+            ('↻', lambda w: self._navigate(self.current_path)),
+        ]
+        for label, cb in btn_data:
+            btn = Gtk.Button(label=label)
+            btn.set_size_request(32, 28)
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+            css = Gtk.CssProvider()
+            css.load_from_data(b'button { background: #16213e; border: none; border-radius: 4px; } button:hover { background: #0f3460; }')
+            btn.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+            btn.connect('clicked', cb)
+            toolbar.pack_start(btn, False, False, 0)
+
+        toolbar.pack_start(Gtk.Label(), True, True, 0)
+
+        # Hidden files toggle
+        self.hidden_btn = Gtk.Button(label='Show Hidden')
+        self.hidden_btn.set_relief(Gtk.ReliefStyle.NONE)
+        self.hidden_btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        css = Gtk.CssProvider()
+        css.load_from_data(b'button { background: #16213e; border: none; border-radius: 4px; padding: 4px 10px; } button:hover { background: #0f3460; }')
+        self.hidden_btn.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        self.hidden_btn.connect('clicked', self._toggle_hidden)
+        toolbar.pack_end(self.hidden_btn, False, False, 0)
+
+        return toolbar
+
+    def _create_path_bar(self):
+        self.path_label = Gtk.Label()
+        self.path_label.set_margin_start(12)
+        self.path_label.set_margin_end(8)
+        self.path_label.set_margin_top(2)
+        self.path_label.set_margin_bottom(2)
+        self.path_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#aaa'))
+        self.path_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        return self.path_label
+
+    def _bold_font(self, size):
+        attr = Pango.AttrList()
+        attr.insert(Pango.AttrFontDesc(Pango.FontDescription(f'DejaVu Sans {size} Bold'), 0, -1))
+        return attr
+
+    def _navigate(self, path):
+        try:
+            path = Path(path).resolve()
+            if not path.is_dir():
+                self._open_file(path)
+                return
+            self.current_path = path
+            self.path_label.set_text(f'📁 {path}')
+            self.list_store.clear()
+            entries = sorted(path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+            for entry in entries:
+                if entry.name.startswith('.') and not self.show_hidden:
+                    continue
+                is_dir = entry.is_dir()
+                name = entry.name
+                icon = '📁' if is_dir else self._get_icon(entry.name)
+                size_str = '' if is_dir else self._format_size(entry.stat().st_size)
+                self.list_store.append([name, str(entry), icon, size_str, is_dir])
+            item_count = len(list(path.iterdir()))
+            self.status_bar.set_text(f'{item_count} items')
+        except PermissionError:
+            self.status_bar.set_text('Permission denied')
+        except Exception as e:
+            self.status_bar.set_text(f'Error: {e}')
+
+    def _get_icon(self, name):
+        ext = Path(name).suffix.lower()
+        return ICON_MAP.get(ext, '📄')
+
+    def _format_size(self, size):
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024:
+                return f'{size:.0f} {unit}'
+            size /= 1024
+        return f'{size:.1f} TB'
+
+    def _on_item_activated(self, icon_view, path):
+        iter_ = self.list_store.get_iter(path)
+        name, filepath, icon, size_str, is_dir = self.list_store.get(iter_, 0, 1, 2, 3, 4)
+        target = Path(filepath)
+        if is_dir:
+            self._navigate(target)
+        else:
+            self._open_file(target)
+
+    def _open_file(self, path):
+        ext = path.suffix.lower()
+        if ext in ('.hsl', '.txt', '.py', '.sh', '.cfg', '.conf', '.md', '.json', '.xml', '.html', '.css', '.js', '.log'):
+            subprocess.Popen(['havok-editor', str(path)], start_new_session=True)
+        elif ext in ('.png', '.jpg', '.jpeg', '.gif', '.svg', '.bmp'):
+            subprocess.Popen(['xdg-open', str(path)], start_new_session=True)
+        elif ext in ('.pdf',):
+            subprocess.Popen(['xdg-open', str(path)], start_new_session=True)
+        elif ext == '.desktop':
+            subprocess.Popen(['gtk-launch', path.name], start_new_session=True)
+        else:
+            subprocess.Popen(['xdg-open', str(path)], start_new_session=True)
+
+    def _on_button_press(self, icon_view, event):
+        if event.button == 3:
+            menu = Gtk.Menu()
+            items = [
+                ('Open', self._open_selected),
+                ('Open in Editor', lambda m: self._open_in_editor()),
+                ('', None),
+                ('New Folder', lambda m: self._new_folder()),
+                ('New File', lambda m: self._new_file()),
+                ('', None),
+                ('Copy', lambda m: self._copy_selected()),
+                ('Paste', lambda m: self._paste()),
+                ('Delete', lambda m: self._delete_selected()),
+                ('', None),
+                ('Open in Terminal', lambda m: self._open_terminal()),
+            ]
+            for label, cb in items:
+                if label == '':
+                    mi = Gtk.SeparatorMenuItem()
+                else:
+                    mi = Gtk.MenuItem(label=label)
+                    if cb:
+                        mi.connect('activate', cb)
+                menu.append(mi)
+            menu.show_all()
+            menu.popup_at_pointer(None)
+
+    def _get_selected_paths(self):
+        paths = []
+        for p in self.icon_view.get_selected_items():
+            iter_ = self.list_store.get_iter(p)
+            filepath = self.list_store.get_value(iter_, 1)
+            paths.append(Path(filepath))
+        return paths
+
+    def _open_selected(self, menu_item=None):
+        for p in self._get_selected_paths():
+            if p.is_dir():
+                self._navigate(p)
+            else:
+                self._open_file(p)
+
+    def _open_in_editor(self):
+        for p in self._get_selected_paths():
+            subprocess.Popen(['havok-editor', str(p)], start_new_session=True)
+
+    def _new_folder(self):
+        dialog = Gtk.MessageDialog(self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.OK_CANCEL, title='New Folder')
+        dialog.set_markup('Enter folder name:')
+        entry = Gtk.Entry()
+        entry.set_text('New Folder')
+        content = dialog.get_content_area()
+        content.pack_end(entry, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        name = entry.get_text().strip()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK and name:
+            try:
+                (self.current_path / name).mkdir()
+                self._navigate(self.current_path)
+            except Exception as e:
+                self.status_bar.set_text(f'Error: {e}')
+
+    def _new_file(self):
+        dialog = Gtk.MessageDialog(self, modal=True, message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.OK_CANCEL, title='New File')
+        dialog.set_markup('Enter file name:')
+        entry = Gtk.Entry()
+        entry.set_text('new_file.hsl')
+        content = dialog.get_content_area()
+        content.pack_end(entry, False, False, 0)
+        dialog.show_all()
+        response = dialog.run()
+        name = entry.get_text().strip()
+        dialog.destroy()
+        if response == Gtk.ResponseType.OK and name:
+            try:
+                (self.current_path / name).touch()
+                self._navigate(self.current_path)
+            except Exception as e:
+                self.status_bar.set_text(f'Error: {e}')
+
+    def _copy_selected(self):
+        selected = self._get_selected_paths()
+        if selected:
+            self.clipboard = ('copy', selected)
+            self.status_bar.set_text(f'Copied {len(selected)} item(s)')
+
+    def _paste(self):
+        if not self.clipboard:
+            return
+        import shutil
+        action, paths = self.clipboard
+        for p in paths:
+            dest = self.current_path / p.name
+            try:
+                if action == 'copy':
+                    shutil.copy2(p, dest)
+                else:
+                    shutil.move(str(p), str(dest))
+            except Exception as e:
+                self.status_bar.set_text(f'Error: {e}')
+        self._navigate(self.current_path)
+        self.status_bar.set_text('Pasted')
+
+    def _delete_selected(self):
+        import shutil
+        paths = self._get_selected_paths()
+        if not paths:
+            return
+        dialog = Gtk.MessageDialog(self, modal=True, message_type=Gtk.MessageType.WARNING,
+                                   buttons=Gtk.ButtonsType.YES_NO, title='Delete')
+        dialog.set_markup(f'Delete {len(paths)} item(s)?')
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            for p in paths:
+                try:
+                    if p.is_dir():
+                        shutil.rmtree(p)
+                    else:
+                        p.unlink()
+                except Exception as e:
+                    self.status_bar.set_text(f'Error: {e}')
+            self._navigate(self.current_path)
+
+    def _open_terminal(self):
+        subprocess.Popen(['lxterminal', '--working-directory=' + str(self.current_path)], start_new_session=True)
+
+    def _go_back(self, widget=None):
+        parent = self.current_path.parent
+        if parent != self.current_path:
+            self._navigate(parent)
+
+    def _go_forward(self, widget=None):
+        pass  # TODO: history
+
+    def _go_up(self, widget=None):
+        self._go_back()
+
+    def _toggle_hidden(self, widget):
+        self.show_hidden = not self.show_hidden
+        self.hidden_btn.set_label('Hide Hidden' if self.show_hidden else 'Show Hidden')
+        self._navigate(self.current_path)
+
+if __name__ == '__main__':
+    path = sys.argv[1] if len(sys.argv) > 1 else None
+    app = HavokFiles(path)
+    app.connect('destroy', Gtk.main_quit)
+    Gtk.main()

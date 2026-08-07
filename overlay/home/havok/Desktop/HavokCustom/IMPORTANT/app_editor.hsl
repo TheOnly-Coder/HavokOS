@@ -1,0 +1,41 @@
+# app_editor.hsl - Havok Editor definition
+# Defines the text/code editor with HSL syntax highlighting
+
+app "Havok Editor" {
+    type: "application"
+    width: 1000
+    height: 700
+    title: "Havok Editor"
+    background: "#1a1a2e"
+
+    # Toolbar
+    container "toolbar" {
+        background: "#0a0a1a"
+        height: 36
+
+        button "New" {
+            on click {
+                print("Editor: new file")
+            }
+        }
+
+        button "Open" {
+            on click {
+                print("Editor: open file")
+            }
+        }
+
+        button "Save" {
+            on click {
+                print("Editor: save file")
+            }
+        }
+    }
+
+    # HSL language support info
+    label "LangInfo" {
+        text: "HSL (Havok Scripting Library) - .hsl files"
+        color: "#888"
+        font_size: 9
+    }
+}

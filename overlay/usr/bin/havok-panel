@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""
+HavokOS Panel - Top bar with app launcher, clock, and system tray.
+"""
+import os, sys, subprocess, time, gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk, GLib, Pango
+
+PANEL_HEIGHT = 32
+BG_COLOR = '#0a0a1a'
+TEXT_COLOR = '#e0e0e0'
+ACCENT_COLOR = '#e94560'
+
+class HavokPanel(Gtk.Window):
+    def __init__(self):
+        super().__init__(title='HavokOS Panel')
+        self.set_type_hint(Gdk.WindowTypeHint.DOCK)
+        self.set_decorated(False)
+        self.set_resizable(False)
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
+
+        # Position at top of screen
+        screen = Gdk.Screen.get_default()
+        self.set_size_request(screen.get_width(), PANEL_HEIGHT)
+        self.move(0, 0)
+
+        # Main horizontal box
+        self.hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.add(self.hbox)
+
+        # Left section: App menu + buttons
+        self.left_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        self.hbox.pack_start(self.left_box, False, False, 5)
+
+        # Menu button
+        self.menu_btn = self._make_button('⬡ HavokOS', ACCENT_COLOR)
+        self.menu_btn.connect('button-press-event', self._show_menu)
+        self.left_box.pack_start(self.menu_btn, False, False, 2)
+
+        # Quick launch buttons
+        for name, cmd, icon in [
+            ('Browser', 'havok-browser', '🌐'),
+            ('Files', 'havok-files', '📁'),
+            ('Editor', 'havok-editor', '📝'),
+            ('Settings', 'havok-settings', '⚙'),
+            ('Terminal', 'lxterminal', '>_'),
+        ]:
+            btn = self._make_button(icon, 'transparent')
+            btn.set_tooltip_text(name)
+            btn.connect('clicked', lambda w, c=cmd: subprocess.Popen(c.split(), start_new_session=True))
+            self.left_box.pack_start(btn, False, False, 1)
+
+        # Center: Spacer (pushes clock to the right)
+        self.hbox.pack_start(Gtk.Label(), True, True, 0)
+
+        # Right section: Clock + system
+        self.right_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=5)
+        self.hbox.pack_end(self.right_box, False, False, 10)
+
+        # Reload HSL button
+        self.reload_btn = self._make_button('↻', '#333')
+        self.reload_btn.set_tooltip_text('Reload HSL Extensions')
+        self.reload_btn.connect('clicked', self._reload_hsl)
+        self.right_box.pack_end(self.reload_btn, False, False, 2)
+
+        # Clock
+        self.clock_label = Gtk.Label()
+        self.clock_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        self.clock_label.set_attributes(self._make_font(11))
+        self.right_box.pack_end(self.clock_label, False, False, 5)
+        self._update_clock()
+        GLib.timeout_add_seconds(1, self._update_clock)
+
+        # Style
+        self.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(BG_COLOR))
+
+        self.show_all()
+
+    def _make_button(self, label, bg):
+        btn = Gtk.Button(label=label)
+        btn.set_size_request(-1, PANEL_HEIGHT - 8)
+        btn.set_relief(Gtk.ReliefStyle.NONE)
+        btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        if bg != 'transparent':
+            btn.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(bg))
+        css = Gtk.CssProvider()
+        css.load_from_data(b'button { border: none; border-radius: 4px; padding: 0 8px; } button:hover { background: #ffffff22; }')
+        btn.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        return btn
+
+    def _make_font(self, size, bold=False):
+        attr = Pango.AttrList()
+        attr.insert(Pango.AttrFontDesc(Pango.FontDescription(f'DejaVu Sans {size}{" Bold" if bold else ""}'), 0, -1))
+        return attr
+
+    def _update_clock(self):
+        t = time.strftime('%H:%M  %a %b %d')
+        self.clock_label.set_text(t)
+        return True
+
+    def _show_menu(self, widget, event):
+        if event.button == 1:
+            menu = Gtk.Menu()
+            apps = [
+                ('Havok Browser', 'havok-browser', '🌐'),
+                ('Havok Files', 'havok-files', '📁'),
+                ('Havok Editor', 'havok-editor', '📝'),
+                ('Havok Settings', 'havok-settings', '⚙'),
+                ('', None, None),
+                ('Terminal', 'lxterminal', '>_'),
+                ('HSL Console', 'lxterminal -e hsl --repl', '⚙'),
+                ('File Manager (PCManFM)', 'pcmanfm', '📁'),
+                ('', None, None),
+                ('Reload HSL Extensions', 'havok-desktop --reload', '↻'),
+                ('Open HavokCustom Folder', 'havok-files ' + os.path.expanduser('~/Desktop/HavokCustom'), '🔧'),
+                ('', None, None),
+                ('About HavokOS', None, 'ℹ'),
+            ]
+            for label, cmd, icon in apps:
+                if label == '':
+                    mi = Gtk.SeparatorMenuItem()
+                else:
+                    display = f'{icon}  {label}' if icon else label
+                    mi = Gtk.MenuItem(label=display)
+                    if cmd:
+                        mi.connect('activate', lambda m, c=cmd: subprocess.Popen(c.split(), start_new_session=True))
+                    elif 'About' in label:
+                        mi.connect('activate', self._show_about)
+                menu.append(mi)
+            menu.show_all()
+            menu.popup_at_widget(widget, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+
+    def _reload_hsl(self, widget):
+        subprocess.Popen(['havok-desktop', '--reload'], start_new_session=True)
+
+    def _show_about(self, widget):
+        dialog = Gtk.MessageDialog(
+            parent=self, modal=True, message_type=Gtk.MessageType.INFO,
+            buttons=Gtk.ButtonsType.OK, title='About HavokOS')
+        dialog.set_markup('<b>HavokOS v1.0.0</b>\nMinimal Linux Desktop OS\nwith HSL customization.')
+        dialog.run()
+        dialog.destroy()
+
+    def _on_quit(self, widget):
+        Gtk.main_quit()
+
+if __name__ == '__main__':
+    panel = HavokPanel()
+    Gtk.main()

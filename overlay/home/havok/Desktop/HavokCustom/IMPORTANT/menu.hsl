@@ -1,0 +1,28 @@
+# menu.hsl - Context menu definitions
+# Defines right-click and app menus
+
+app "Desktop Context Menu" {
+    type: "menu"
+
+    menu_item "Open Terminal" {
+        action: "shell(lxterminal)"
+    }
+
+    menu_item "Havok Browser" {
+        action: "shell(havok-browser)"
+    }
+
+    menu_item "Havok Files" {
+        action: "shell(havok-files)"
+    }
+
+    separator {}
+
+    menu_item "Reload HSL Extensions" {
+        action: "shell(havok-desktop --reload)"
+    }
+
+    menu_item "About HavokOS" {
+        action: "about"
+    }
+}

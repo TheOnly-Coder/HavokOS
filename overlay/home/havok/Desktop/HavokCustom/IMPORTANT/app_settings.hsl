@@ -1,0 +1,51 @@
+# app_settings.hsl - Havok Settings definition
+# Defines the settings/control panel application
+
+app "Havok Settings" {
+    type: "application"
+    width: 850
+    height: 600
+    title: "Havok Settings"
+    background: "#1a1a2e"
+
+    container "sidebar" {
+        background: "#0f0f23"
+        width: 200
+
+        label "Settings" {
+            text: "Settings"
+            color: "#e94560"
+            font_size: 14
+        }
+
+        button "Display" {
+            on click {
+                print("Settings: display panel")
+            }
+        }
+
+        button "Appearance" {
+            on click {
+                print("Settings: appearance panel")
+            }
+        }
+
+        button "Network" {
+            on click {
+                print("Settings: network panel")
+            }
+        }
+
+        button "HSL" {
+            on click {
+                print("Settings: HSL configuration")
+            }
+        }
+
+        button "About" {
+            on click {
+                print("Settings: about HavokOS")
+            }
+        }
+    }
+}

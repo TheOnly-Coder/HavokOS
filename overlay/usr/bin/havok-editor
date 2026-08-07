@@ -1,0 +1,402 @@
+#!/usr/bin/env python3
+"""
+Havok Editor - A text/code editor for HavokOS with HSL syntax highlighting.
+"""
+import os, sys, gi
+from pathlib import Path
+gi.require_version('Gtk', '3.0')
+gi.require_version('GtkSource', '4')
+try:
+    from gi.repository import GtkSource
+    HAS_SOURCEVIEW = True
+except ImportError:
+    HAS_SOURCEVIEW = False
+from gi.repository import Gtk, Gdk, GLib, Pango
+
+BG_COLOR = '#1a1a2e'
+EDITOR_BG = '#0f0f23'
+SIDEBAR_BG = '#16213e'
+TEXT_COLOR = '#e0e0e0'
+ACCENT = '#e94560'
+LINE_NUM_BG = '#0a0a1a'
+
+# HSL keywords for syntax highlighting
+HSL_KEYWORDS = [
+    'app', 'window', 'button', 'label', 'container', 'panel', 'menu',
+    'on', 'click', 'dblclick', 'hover', 'load', 'open', 'close',
+    'if', 'else', 'while', 'for', 'func', 'return', 'import',
+    'true', 'false', 'print', 'shell', 'read_file', 'write_file',
+    'list_dir', 'exists', 'mkdir', 'len', 'str', 'int', 'float',
+    'type', 'range', 'append', 'join', 'split', 'upper', 'lower',
+    'replace', 'contains', 'trim', 'getenv', 'sleep', 'now',
+]
+
+class HavokEditor(Gtk.Window):
+    def __init__(self, filepath=None):
+        super().__init__(title='Havok Editor - Untitled')
+        self.set_default_size(1000, 700)
+        self.set_position(Gtk.WindowPosition.CENTER)
+        self.current_file = Path(filepath) if filepath else None
+        self.modified = False
+
+        # Main horizontal pane (sidebar + editor)
+        self.pane = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.pane.set_position(220)
+        self.add(self.pane)
+
+        # Sidebar: file browser
+        self.sidebar = self._create_sidebar()
+        self.pane.pack1(self.sidebar, False, False)
+
+        # Editor area
+        editor_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.pane.pack2(editor_box, True, True)
+
+        # Tab bar
+        self.tab_bar = self._create_tab_bar()
+        editor_box.pack_start(self.tab_bar, False, False, 0)
+
+        # Toolbar
+        self.toolbar = self._create_toolbar()
+        editor_box.pack_start(self.toolbar, False, False, 0)
+
+        # Text editor
+        self.editor = self._create_editor()
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.add(self.editor)
+        editor_box.pack_start(scrolled, True, True, 0)
+
+        # Status bar
+        self.status_bar = Gtk.Label(label='Ready')
+        self.status_bar.set_margin_start(10)
+        self.status_bar.set_margin_bottom(4)
+        self.status_bar.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#888'))
+        editor_box.pack_start(self.status_bar, False, False, 0)
+
+        self.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(BG_COLOR))
+        self.show_all()
+
+        if self.current_file and self.current_file.is_file():
+            self._open_file(self.current_file)
+        else:
+            self._update_tab()
+
+    def _create_sidebar(self):
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(SIDEBAR_BG))
+        sidebar.set_size_request(220, -1)
+
+        title = Gtk.Label(label='  Files')
+        title.set_halign(Gtk.Align.START)
+        title.set_margin_top(10)
+        title.set_margin_bottom(5)
+        title.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(ACCENT))
+        title.set_attributes(self._bold_font(12))
+        sidebar.pack_start(title, False, False, 0)
+
+        # File tree
+        self.file_store = Gtk.TreeStore(str, str, bool)  # name, path, is_dir
+        self.file_tree = Gtk.TreeView(model=self.file_store)
+        self.file_tree.set_headers_visible(False)
+        self.file_tree.connect('row-activated', self._on_file_tree_activated)
+
+        renderer = Gtk.CellRendererText()
+        renderer.set_property('foreground', TEXT_COLOR)
+        col = Gtk.TreeViewColumn('Name', renderer, text=0)
+        self.file_tree.append_column(col)
+
+        css = Gtk.CssProvider()
+        css.load_from_data(b'''GtkTreeView { background: #16213e; }
+            GtkTreeView:selected { background: #0f3460; border-radius: 0; }
+            GtkTreeView { border: none; }
+            GtkTreeView header { background: #0f3460; }''')
+        self.file_tree.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.add(self.file_tree)
+        sidebar.pack_start(scrolled, True, True, 0)
+
+        # Open folder button
+        open_btn = Gtk.Button(label='📂 Open Folder')
+        open_btn.set_margin(5)
+        open_btn.set_relief(Gtk.ReliefStyle.NONE)
+        open_btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        css2 = Gtk.CssProvider()
+        css2.load_from_data(b'button { background: #0f3460; border: none; border-radius: 4px; padding: 6px; } button:hover { background: #e94560; }')
+        open_btn.get_style_context().add_provider(css2, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        open_btn.connect('clicked', self._open_folder)
+        sidebar.pack_start(open_btn, False, False, 0)
+
+        # Load default folder
+        self._load_folder(Path.home())
+
+        return sidebar
+
+    def _load_folder(self, path, parent=None):
+        try:
+            entries = sorted(path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+            for entry in entries:
+                if entry.name.startswith('.'):
+                    continue
+                is_dir = entry.is_dir()
+                icon = '📁 ' if is_dir else '📄 '
+                tree_iter = self.file_store.append(parent, [icon + entry.name, str(entry), is_dir])
+                if is_dir and (entry.name in ('Desktop', 'Documents', 'HavokCustom', 'IMPORTANT') or parent is None):
+                    self._load_folder(entry, tree_iter)
+        except PermissionError:
+            pass
+
+    def _on_file_tree_activated(self, treeview, path, column):
+        iter_ = self.file_store.get_iter(path)
+        name, filepath, is_dir = self.file_store.get(iter_, 0, 1, 2)
+        p = Path(filepath)
+        if is_dir:
+            self._load_folder(p, iter_)
+        else:
+            self._open_file(p)
+
+    def _create_tab_bar(self):
+        tab_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        tab_box.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#0a0a1a'))
+
+        self.tab_label = Gtk.Label(label='Untitled')
+        self.tab_label.set_margin_start(10)
+        self.tab_label.set_margin_top(5)
+        self.tab_label.set_margin_bottom(5)
+        self.tab_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        tab_box.pack_start(self.tab_label, False, False, 0)
+
+        close_tab = Gtk.Button(label='×')
+        close_tab.set_relief(Gtk.ReliefStyle.NONE)
+        close_tab.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#888'))
+        css = Gtk.CssProvider()
+        css.load_from_data(b'button { background: transparent; border: none; } button:hover { background: #e94560; color: white; border-radius: 4px; }')
+        close_tab.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+        close_tab.connect('clicked', self._new_file)
+        tab_box.pack_end(close_tab, False, False, 5)
+
+        return tab_box
+
+    def _create_toolbar(self):
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        toolbar.set_margin_start(8)
+        toolbar.set_margin_end(8)
+        toolbar.set_margin_top(4)
+        toolbar.set_margin_bottom(4)
+
+        btns = [
+            ('📄 New', self._new_file),
+            ('📂 Open', self._open_dialog),
+            ('💾 Save', self._save_file),
+            ('💾 Save As', self._save_as),
+        ]
+        for label, cb in btns:
+            btn = Gtk.Button(label=label)
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+            css = Gtk.CssProvider()
+            css.load_from_data(b'button { background: #16213e; border: none; border-radius: 4px; padding: 4px 10px; } button:hover { background: #0f3460; }')
+            btn.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+            btn.connect('clicked', cb)
+            toolbar.pack_start(btn, False, False, 0)
+
+        toolbar.pack_start(Gtk.Label(), True, True, 0)
+
+        # Language label
+        self.lang_label = Gtk.Label(label='Plain Text')
+        self.lang_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#888'))
+        toolbar.pack_end(self.lang_label, False, False, 5)
+
+        return toolbar
+
+    def _create_editor(self):
+        if HAS_SOURCEVIEW:
+            self.buffer = GtkSource.Buffer()
+            self.editor = GtkSource.View(buffer=self.buffer)
+            # Set up HSL language
+            lang_manager = GtkSource.LanguageManager.get_default()
+            # Create a simple HSL language definition
+            self._setup_hsl_language(lang_manager)
+            lang = lang_manager.get_language('hsl')
+            if lang:
+                self.buffer.set_language(lang)
+            style_manager = GtkSource.StyleSchemeManager.get_default()
+            scheme = style_manager.get_scheme('oblivion') or style_manager.get_scheme('tango')
+            if scheme:
+                self.buffer.set_style_scheme(scheme)
+            self.editor.set_show_line_numbers(True)
+            self.editor.set_show_right_margin(True)
+            self.editor.set_right_margin_position(80)
+            self.editor.set_auto_indent(True)
+            self.editor.set_indent_on_tab(True)
+            self.editor.set_tab_width(4)
+            self.editor.set_insert_spaces_instead_of_tabs(True)
+            self.editor.set_monospace(True)
+            self.editor.set_highlight_current_line(True)
+            self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        else:
+            self.buffer = Gtk.TextBuffer()
+            self.editor = Gtk.TextView(buffer=self.buffer)
+            self.editor.set_monospace(True)
+            self.editor.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+            self.editor.set_left_margin(10)
+            self.editor.set_top_margin(5)
+            self.editor.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(EDITOR_BG))
+            self.editor.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+
+        self.buffer.connect('changed', self._on_text_changed)
+        return self.editor
+
+    def _setup_hsl_language(self, lang_manager):
+        hsl_def = '''<?xml version="1.0" encoding="UTF-8"?>
+<language id="hsl" name="Havok Scripting Library" version="1.0">
+  <metadata>
+    <property name="mimetypes">text/x-hsl</property>
+    <property name="globs">*.hsl</property>
+  </metadata>
+  <styles>
+    <style id="keyword" name="Keyword" map-to="def:keyword"/>
+    <style id="string" name="String" map-to="def:string"/>
+    <style id="comment" name="Comment" map-to="def:comment"/>
+    <style id="number" name="Number" map-to="def:number"/>
+    <style id="type" name="Type" map-to="def:type"/>
+  </styles>
+  <definitions>
+    <context id="hsl">
+      <include>
+        <context ref="def:comments"/>
+        <context ref="def:strings"/>
+        <context ref="def:numbers"/>
+        <context id="keywords" style-ref="keyword">
+          <keyword>app</keyword><keyword>window</keyword><keyword>button</keyword>
+          <keyword>label</keyword><keyword>container</keyword><keyword>panel</keyword>
+          <keyword>menu</keyword><keyword>on</keyword><keyword>click</keyword>
+          <keyword>if</keyword><keyword>else</keyword><keyword>while</keyword>
+          <keyword>for</keyword><keyword>func</keyword><keyword>return</keyword>
+          <keyword>import</keyword><keyword>true</keyword><keyword>false</keyword>
+          <keyword>print</keyword><keyword>shell</keyword>
+        </context>
+      </include>
+    </context>
+  </definitions>
+</language>'''
+        lang_file = '/tmp/hsl.lang'
+        with open(lang_file, 'w') as f:
+            f.write(hsl_def)
+        lang_manager.append_search_path('/tmp')
+
+    def _on_text_changed(self, buffer):
+        self.modified = True
+        if not self.current_file:
+            self.set_title('Havok Editor - Untitled *')
+        else:
+            self.set_title(f'Havok Editor - {self.current_file.name} *')
+        # Update status
+        start = buffer.get_start_iter()
+        end = buffer.get_end_iter()
+        text = buffer.get_text(start, end, False)
+        lines = text.count('\n') + 1
+        chars = len(text)
+        self.status_bar.set_text(f'Lines: {lines}  |  Characters: {chars}  |  Modified')
+
+    def _open_file(self, path):
+        try:
+            with open(path, 'r') as f:
+                content = f.read()
+            self.buffer.set_text(content)
+            self.current_file = Path(path)
+            self.modified = False
+            self._update_tab()
+            self.set_title(f'Havok Editor - {path.name}')
+            # Detect language
+            ext = path.suffix.lower()
+            lang_map = {'.hsl': 'HSL', '.py': 'Python', '.sh': 'Shell', '.js': 'JavaScript',
+                       '.html': 'HTML', '.css': 'CSS', '.json': 'JSON', '.xml': 'XML', '.md': 'Markdown'}
+            self.lang_label.set_text(lang_map.get(ext, 'Plain Text'))
+        except Exception as e:
+            self.status_bar.set_text(f'Error opening file: {e}')
+
+    def _open_dialog(self, widget=None):
+        dialog = Gtk.FileChooserDialog(title='Open File', parent=self,
+                                       action=Gtk.FileChooserAction.OPEN)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Open', Gtk.ResponseType.OK)
+        dialog.set_current_folder(str(Path.home()))
+        # Filter for HSL files
+        hsl_filter = Gtk.FileFilter()
+        hsl_filter.set_name('HSL Files (*.hsl)')
+        hsl_filter.add_pattern('*.hsl')
+        dialog.add_filter(hsl_filter)
+        all_filter = Gtk.FileFilter()
+        all_filter.set_name('All Files')
+        all_filter.add_pattern('*')
+        dialog.add_filter(all_filter)
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            self._open_file(dialog.get_filename())
+        dialog.destroy()
+
+    def _save_file(self, widget=None):
+        if not self.current_file:
+            self._save_as()
+            return
+        try:
+            start = self.buffer.get_start_iter()
+            end = self.buffer.get_end_iter()
+            content = self.buffer.get_text(start, end, False)
+            with open(self.current_file, 'w') as f:
+                f.write(content)
+            self.modified = False
+            self.set_title(f'Havok Editor - {self.current_file.name}')
+            self.status_bar.set_text(f'Saved: {self.current_file}')
+        except Exception as e:
+            self.status_bar.set_text(f'Error saving: {e}')
+
+    def _save_as(self, widget=None):
+        dialog = Gtk.FileChooserDialog(title='Save As', parent=self,
+                                       action=Gtk.FileChooserAction.SAVE)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Save', Gtk.ResponseType.OK)
+        if self.current_file:
+            dialog.set_current_name(self.current_file.name)
+        else:
+            dialog.set_current_name('untitled.hsl')
+        dialog.set_current_folder(str(Path.home()))
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            self.current_file = Path(dialog.get_filename())
+            self._save_file()
+        dialog.destroy()
+
+    def _new_file(self, widget=None):
+        self.buffer.set_text('')
+        self.current_file = None
+        self.modified = False
+        self._update_tab()
+        self.set_title('Havok Editor - Untitled')
+        self.lang_label.set_text('Plain Text')
+        self.status_bar.set_text('Ready')
+
+    def _update_tab(self):
+        name = self.current_file.name if self.current_file else 'Untitled'
+        self.tab_label.set_text(f'  {name}  ')
+
+    def _open_folder(self, widget=None):
+        dialog = Gtk.FileChooserDialog(title='Open Folder', parent=self,
+                                       action=Gtk.FileChooserAction.SELECT_FOLDER)
+        dialog.add_buttons('Cancel', Gtk.ResponseType.CANCEL, 'Open', Gtk.ResponseType.OK)
+        response = dialog.run()
+        if response == Gtk.ResponseType.OK:
+            self.file_store.clear()
+            self._load_folder(Path(dialog.get_filename()))
+            self.file_tree.expand_all()
+        dialog.destroy()
+
+    def _bold_font(self, size):
+        attr = Pango.AttrList()
+        attr.insert(Pango.AttrFontDesc(Pango.FontDescription(f'DejaVu Sans {size} Bold'), 0, -1))
+        return attr
+
+if __name__ == '__main__':
+    path = sys.argv[1] if len(sys.argv) > 1 else None
+    editor = HavokEditor(path)
+    editor.connect('destroy', Gtk.main_quit)
+    Gtk.main()

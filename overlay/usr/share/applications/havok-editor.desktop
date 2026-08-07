@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Havok Editor
+Comment=Edit text and code files
+Exec=havok-editor
+Icon=text-editor
+Terminal=false
+Type=Application
+Categories=TextEditor;IDE;
+StartupNotify=true
+MimeType=text/x-hsl;text/plain;

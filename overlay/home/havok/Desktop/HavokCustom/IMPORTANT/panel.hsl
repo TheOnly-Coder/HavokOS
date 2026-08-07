@@ -1,0 +1,58 @@
+# panel.hsl - Top panel definition
+# Defines the HavokOS top bar with app launcher and clock
+
+app "HavokOS Panel" {
+    type: "panel"
+    height: 32
+    background: "#0a0a1a"
+    text_color: "#e0e0e0"
+    accent: "#e94560"
+
+    # Menu button
+    button "HavokOS" {
+        text: "HavokOS"
+        color: "#e0e0e0"
+        background: "#e94560"
+        font_size: 11
+
+        on click {
+            print("Opening HavokOS menu")
+        }
+    }
+
+    # Quick launch buttons
+    button "Browser" {
+        icon: "browser"
+        on click {
+            shell("havok-browser")
+        }
+    }
+
+    button "Files" {
+        icon: "files"
+        on click {
+            shell("havok-files")
+        }
+    }
+
+    button "Editor" {
+        icon: "editor"
+        on click {
+            shell("havok-editor")
+        }
+    }
+
+    button "Settings" {
+        icon: "settings"
+        on click {
+            shell("havok-settings")
+        }
+    }
+
+    button "Terminal" {
+        icon: "terminal"
+        on click {
+            shell("lxterminal")
+        }
+    }
+}

@@ -1,0 +1,438 @@
+#!/usr/bin/env python3
+"""
+Havok Settings - System settings application for HavokOS.
+"""
+import os, sys, subprocess, gi
+from pathlib import Path
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk, GLib, Pango
+
+BG_COLOR = '#1a1a2e'
+SIDEBAR_BG = '#0f0f23'
+TEXT_COLOR = '#e0e0e0'
+ACCENT = '#e94560'
+PANEL_BG = '#16213e'
+
+
+class HavokSettings(Gtk.Window):
+    def __init__(self):
+        super().__init__(title='Havok Settings')
+        self.set_default_size(850, 600)
+        self.set_position(Gtk.WindowPosition.CENTER)
+
+        # Main horizontal pane
+        self.pane = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.pane.set_position(200)
+        self.add(self.pane)
+
+        # Sidebar with categories
+        self.sidebar = self._create_sidebar()
+        self.pane.pack1(self.sidebar, False, False)
+
+        # Content area
+        self.content_scroll = Gtk.ScrolledWindow()
+        self.content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.content_box.set_margin_start(20)
+        self.content_box.set_margin_end(20)
+        self.content_box.set_margin_top(15)
+        self.content_box.set_margin_bottom(15)
+        self.content_scroll.add(self.content_box)
+        self.pane.pack2(self.content_scroll, True, True)
+
+        self.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(BG_COLOR))
+        self.show_all()
+        self._show_panel('about')
+
+    def _create_sidebar(self):
+        sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(SIDEBAR_BG))
+        sidebar.set_size_request(200, -1)
+
+        # Title
+        title = Gtk.Label(label='  Settings')
+        title.set_halign(Gtk.Align.START)
+        title.set_margin_top(15)
+        title.set_margin_bottom(10)
+        title.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(ACCENT))
+        title.set_attributes(self._bold_font(14))
+        sidebar.pack_start(title, False, False, 0)
+
+        categories = [
+            ('🖥  Display', 'display'),
+            ('🎨  Appearance', 'appearance'),
+            ('🌐  Network', 'network'),
+            ('🔊  Sound', 'sound'),
+            ('⌨  Keyboard', 'keyboard'),
+            ('🔋  Power', 'power'),
+            ('📦  Packages', 'packages'),
+            ('🔧  HSL Settings', 'hsl'),
+            ('ℹ  About', 'about'),
+        ]
+        for label, panel_id in categories:
+            btn = Gtk.Button(label=label)
+            btn.set_halign(Gtk.Align.START)
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.set_margin_start(10)
+            btn.set_margin_end(10)
+            btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+            css = Gtk.CssProvider()
+            css.load_from_data(b'button { background: transparent; border: none; padding: 8px 6px; } button:hover { background: #ffffff11; border-radius: 4px; }')
+            btn.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+            btn.connect('clicked', lambda w, p=panel_id: self._show_panel(p))
+            sidebar.pack_start(btn, False, False, 0)
+
+        sidebar.pack_start(Gtk.Separator(), False, False, 10)
+
+        # Version info
+        ver = Gtk.Label(label='  HavokOS v1.0.0')
+        ver.set_halign(Gtk.Align.START)
+        ver.set_margin_start(10)
+        ver.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#666'))
+        sidebar.pack_end(ver, False, False, 10)
+
+        return sidebar
+
+    def _clear_content(self):
+        for child in self.content_box.get_children():
+            self.content_box.remove(child)
+
+    def _show_panel(self, panel_id):
+        self._clear_content()
+        getattr(self, f'_panel_{panel_id}', self._panel_about)()
+        self.content_box.show_all()
+
+    def _make_section(self, title, description=''):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_bottom(20)
+
+        lbl = Gtk.Label(label=title)
+        lbl.set_halign(Gtk.Align.START)
+        lbl.set_attributes(self._bold_font(18))
+        lbl.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        box.pack_start(lbl, False, False, 0)
+
+        if description:
+            desc = Gtk.Label(label=description)
+            desc.set_halign(Gtk.Align.START)
+            desc.set_line_wrap(True)
+            desc.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#888'))
+            box.pack_start(desc, False, False, 0)
+
+        return box
+
+    def _make_row(self, label_text, widget):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.set_margin_top(8)
+        row.set_margin_bottom(8)
+
+        lbl = Gtk.Label(label=label_text)
+        lbl.set_xalign(0)
+        lbl.set_size_request(200, -1)
+        lbl.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        row.pack_start(lbl, False, False, 0)
+
+        row.pack_end(widget, False, False, 0)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#333'))
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.pack_start(row, False, False, 0)
+        box.pack_start(sep, False, False, 5)
+
+        return box
+
+    def _panel_about(self):
+        self._clear_content()
+        section = self._make_section('About HavokOS')
+        self.content_box.pack_start(section, False, False, 0)
+
+        info = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        info.set_margin_top(15)
+
+        # Logo area
+        logo = Gtk.Label()
+        logo.set_markup('<span size="xx-large" weight="bold" foreground="#e94560">⬡ HavokOS</span>')
+        logo.set_halign(Gtk.Align.CENTER)
+        info.pack_start(logo, False, False, 0)
+
+        version = Gtk.Label(label='Version 1.0.0')
+        version.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#888'))
+        version.set_halign(Gtk.Align.CENTER)
+        info.pack_start(version, False, False, 0)
+
+        # System info
+        sep = Gtk.Separator()
+        info.pack_start(sep, False, False, 10)
+
+        sys_info = self._get_system_info()
+        for key, val in sys_info:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=15)
+            row.set_margin_start(20)
+            k = Gtk.Label(label=key)
+            k.set_size_request(150, -1)
+            k.set_xalign(0)
+            k.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#888'))
+            k.set_attributes(self._bold_font(11))
+            v = Gtk.Label(label=val)
+            v.set_xalign(0)
+            v.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+            row.pack_start(k, False, False, 0)
+            row.pack_start(v, False, False, 0)
+            info.pack_start(row, False, False, 2)
+
+        self.content_box.pack_start(info, False, False, 0)
+
+    def _panel_display(self):
+        section = self._make_section('Display Settings', 'Configure monitor resolution and layout.')
+        self.content_box.pack_start(section, False, False, 0)
+
+        # Resolution info
+        screen = Gdk.Screen.get_default()
+        w, h = screen.get_width(), screen.get_height()
+        res_label = Gtk.Label(label=f'{w} x {h}')
+        res_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        self.content_box.pack_start(self._make_row('Current Resolution', res_label), False, False, 0)
+
+        # Apply button
+        btn = Gtk.Button(label='Open Display Config')
+        self._style_action_btn(btn)
+        btn.connect('clicked', lambda w: subprocess.Popen(['lxterminal', '-e', 'arandr'], start_new_session=True))
+        self.content_box.pack_start(btn, False, False, 20)
+
+    def _panel_appearance(self):
+        section = self._make_section('Appearance', 'Customize the look and feel of HavokOS.')
+        self.content_box.pack_start(section, False, False, 0)
+
+        # Theme selection
+        themes = ['HavokOS Dark (Default)', 'Adwaita Dark', 'Adwaita Light']
+        combo = Gtk.ComboBoxText()
+        for t in themes:
+            combo.append_text(t)
+        combo.set_active(0)
+        self.content_box.pack_start(self._make_row('GTK Theme', combo), False, False, 0)
+
+        # Accent color
+        colors_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        for color, name in [('#e94560', 'Red'), ('#0f3460', 'Blue'), ('#533483', 'Purple'), ('#00b894', 'Green'), ('#fdcb6e', 'Yellow')]:
+            btn = Gtk.Button()
+            btn.set_size_request(40, 40)
+            btn.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(color))
+            btn.set_tooltip_text(name)
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            colors_box.pack_start(btn, False, False, 0)
+        self.content_box.pack_start(self._make_row('Accent Color', colors_box), False, False, 0)
+
+        # Font size
+        font_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 8, 20, 1)
+        font_scale.set_value(11)
+        font_scale.set_hexpand(True)
+        font_scale.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        self.content_box.pack_start(self._make_row('Font Size', font_scale), False, False, 0)
+
+    def _panel_network(self):
+        section = self._make_section('Network', 'Configure network connections.')
+        self.content_box.pack_start(section, False, False, 0)
+
+        # Network status
+        status = self._check_network()
+        status_label = Gtk.Label(label='Connected' if status else 'Disconnected')
+        color = '#00b894' if status else '#e94560'
+        status_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(color))
+        status_label.set_attributes(self._bold_font(11))
+        self.content_box.pack_start(self._make_row('Status', status_label), False, False, 0)
+
+        # Connection type
+        conn_type = subprocess.run(['nmcli', '-t', '-f', 'TYPE', 'connection', 'show', '--active'],
+                                  capture_output=True, text=True).stdout.strip()
+        conn_label = Gtk.Label(label=conn_type if conn_type else 'Unknown')
+        conn_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        self.content_box.pack_start(self._make_row('Connection', conn_label), False, False, 0)
+
+        btn = Gtk.Button(label='Open Network Manager')
+        self._style_action_btn(btn)
+        btn.connect('clicked', lambda w: subprocess.Popen(['nm-connection-editor'], start_new_session=True))
+        self.content_box.pack_start(btn, False, False, 20)
+
+    def _panel_sound(self):
+        section = self._make_section('Sound', 'Configure audio output.')
+        self.content_box.pack_start(section, False, False, 0)
+
+        volume = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
+        volume.set_value(75)
+        volume.set_hexpand(True)
+        self.content_box.pack_start(self._make_row('Master Volume', volume), False, False, 0)
+
+        btn = Gtk.Button(label='Open Sound Settings')
+        self._style_action_btn(btn)
+        btn.connect('clicked', lambda w: subprocess.Popen(['lxterminal', '-e', 'alsamixer'], start_new_session=True))
+        self.content_box.pack_start(btn, False, False, 20)
+
+    def _panel_keyboard(self):
+        section = self._make_section('Keyboard', 'Configure keyboard settings.')
+        self.content_box.pack_start(section, False, False, 0)
+
+        layout_label = Gtk.Label(label='English (US)')
+        layout_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        self.content_box.pack_start(self._make_row('Layout', layout_label), False, False, 0)
+
+        btn = Gtk.Button(label='Open Keyboard Config')
+        self._style_action_btn(btn)
+        btn.connect('clicked', lambda w: subprocess.Popen(['lxterminal', '-e', 'dpkg-reconfigure', 'keyboard-configuration'], start_new_session=True))
+        self.content_box.pack_start(btn, False, False, 20)
+
+    def _panel_power(self):
+        section = self._make_section('Power', 'Power management options.')
+        self.content_box.pack_start(section, False, False, 0)
+
+        for label, cmd in [
+            ('Suspend', 'systemctl suspend'),
+            ('Hibernate', 'systemctl hibernate'),
+            ('Restart', 'systemctl reboot'),
+            ('Shut Down', 'systemctl poweroff'),
+        ]:
+            btn = Gtk.Button(label=label)
+            self._style_action_btn(btn)
+            btn.set_size_request(200, 40)
+            btn.set_margin_top(5)
+            btn.connect('clicked', lambda w, c=cmd: self._confirm_action(label, c))
+            self.content_box.pack_start(btn, False, False, 5)
+
+    def _panel_packages(self):
+        section = self._make_section('Packages', 'Manage system packages.')
+        self.content_box.pack_start(section, False, False, 0)
+
+        info_label = Gtk.Label(label='Use the terminal to manage packages with apt:')
+        info_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#888'))
+        self.content_box.pack_start(info_label, False, False, 10)
+
+        code_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+        for cmd in ['sudo apt update', 'sudo apt install <package>', 'sudo apt remove <package>', 'apt search <keyword>']:
+            lbl = Gtk.Label(label=f'  {cmd}')
+            lbl.set_xalign(0)
+            lbl.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#00b894'))
+            lbl.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#0a0a1a'))
+            lbl.set_margin_start(10)
+            lbl.set_margin_end(10)
+            lbl.set_margin_top(3)
+            lbl.set_margin_bottom(3)
+            code_box.pack_start(lbl, False, False, 0)
+        self.content_box.pack_start(code_box, False, False, 0)
+
+        btn = Gtk.Button(label='Open Terminal')
+        self._style_action_btn(btn)
+        btn.connect('clicked', lambda w: subprocess.Popen(['lxterminal'], start_new_session=True))
+        self.content_box.pack_start(btn, False, False, 20)
+
+    def _panel_hsl(self):
+        section = self._make_section('HSL Settings', 'Configure the Havok Scripting Library.')
+        self.content_box.pack_start(section, False, False, 0)
+
+        # HSL version
+        ver_label = Gtk.Label(label='1.0.0')
+        ver_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        self.content_box.pack_start(self._make_row('HSL Version', ver_label), False, False, 0)
+
+        # HSL path
+        custom_dir = os.path.expanduser('~/Desktop/HavokCustom')
+        path_label = Gtk.Label(label=custom_dir)
+        path_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('#00b894'))
+        self.content_box.pack_start(self._make_row('Custom Folder', path_label), False, False, 0)
+
+        # Count HSL files
+        important_dir = os.path.join(custom_dir, 'IMPORTANT')
+        sys_count = len(list(Path(important_dir).glob('*.hsl'))) if Path(important_dir).exists() else 0
+        user_count = len(list(Path(custom_dir).glob('*.hsl')))
+        count_label = Gtk.Label(label=f'{sys_count} system + {user_count - sys_count} user')
+        count_label.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse(TEXT_COLOR))
+        self.content_box.pack_start(self._make_row('Loaded Scripts', count_label), False, False, 0)
+
+        # Buttons
+        btn_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        btn_box.set_margin_top(15)
+
+        reload_btn = Gtk.Button(label='↻ Reload Extensions')
+        self._style_action_btn(reload_btn)
+        reload_btn.connect('clicked', self._reload_hsl)
+        btn_box.pack_start(reload_btn, False, False, 0)
+
+        open_btn = Gtk.Button(label='📂 Open Custom Folder')
+        self._style_action_btn(open_btn)
+        open_btn.connect('clicked', lambda w: subprocess.Popen(['havok-files', custom_dir], start_new_session=True))
+        btn_box.pack_start(open_btn, False, False, 0)
+
+        console_btn = Gtk.Button(label='🔧 HSL Console')
+        self._style_action_btn(console_btn)
+        console_btn.connect('clicked', lambda w: subprocess.Popen(['lxterminal', '-e', 'hsl', '--repl'], start_new_session=True))
+        btn_box.pack_start(console_btn, False, False, 0)
+
+        self.content_box.pack_start(btn_box, False, False, 0)
+
+        # Info box
+        info = Gtk.Label()
+        info.set_markup('''<span size="small" foreground="#888">
+<b>HSL (Havok Scripting Library)</b> allows you to customize HavokOS.
+Place .hsl files in ~/Desktop/HavokCustom/ to extend your desktop.
+System files are in ~/Desktop/HavokCustom/IMPORTANT/.
+</span>''')
+        info.set_line_wrap(True)
+        info.set_margin_top(20)
+        self.content_box.pack_start(info, False, False, 0)
+
+    def _style_action_btn(self, btn):
+        btn.set_relief(Gtk.ReliefStyle.NONE)
+        btn.override_color(Gtk.StateFlags.NORMAL, Gdk.RGBA.parse('white'))
+        css = Gtk.CssProvider()
+        css.load_from_data(b'button { background: #e94560; border: none; border-radius: 6px; padding: 8px 20px; font-weight: bold; } button:hover { background: #c73652; }')
+        btn.get_style_context().add_provider(css, Gtk.STYLE_PROVIDER_PRIORITY_USER)
+
+    def _get_system_info(self):
+        import platform
+        info = []
+        info.append(('OS', 'HavokOS 1.0.0 (Debian Bookworm)'))
+        info.append(('Kernel', platform.release()))
+        info.append(('Architecture', platform.machine()))
+        info.append(('Desktop', 'HavokOS Desktop (Openbox + GTK3)'))
+        info.append(('Window Manager', 'Openbox'))
+        info.append(('HSL Version', '1.0.0'))
+        try:
+            mem = subprocess.run(['free', '-h'], capture_output=True, text=True).stdout
+            for line in mem.split('\n'):
+                if 'Mem:' in line:
+                    parts = line.split()
+                    info.append(('Memory', f'{parts[1]} total / {parts[2]} used'))
+                    break
+        except:
+            pass
+        info.append(('User', os.environ.get('USER', 'havok')))
+        return info
+
+    def _check_network(self):
+        try:
+            result = subprocess.run(['ping', '-c', '1', '-W', '2', '8.8.8.8'],
+                                  capture_output=True, text=True, timeout=5)
+            return result.returncode == 0
+        except:
+            return False
+
+    def _confirm_action(self, label, cmd):
+        dialog = Gtk.MessageDialog(self, modal=True, message_type=Gtk.MessageType.WARNING,
+                                   buttons=Gtk.ButtonsType.YES_NO, title=f'Confirm {label}')
+        dialog.set_markup(f'Are you sure you want to {label.lower()}?')
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            subprocess.Popen(cmd.split(), start_new_session=True)
+
+    def _reload_hsl(self, widget=None):
+        subprocess.Popen(['havok-desktop', '--reload'], start_new_session=True)
+
+    def _bold_font(self, size):
+        attr = Pango.AttrList()
+        attr.insert(Pango.AttrFontDesc(Pango.FontDescription(f'DejaVu Sans {size} Bold'), 0, -1))
+        return attr
+
+if __name__ == '__main__':
+    settings = HavokSettings()
+    settings.connect('destroy', Gtk.main_quit)
+    Gtk.main()

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Havok Files
+Comment=Browse files and folders
+Exec=havok-files
+Icon=system-file-manager
+Terminal=false
+Type=Application
+Categories=System;FileManager;
+StartupNotify=true
