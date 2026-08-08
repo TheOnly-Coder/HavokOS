@@ -1,6 +1,6 @@
 #!/bin/bash
-# HavokOS ISO Builder v2.2
-# Fixed: v2.0 initramfs (gzip), v2.1 sysvinit-core, v2.2 initscripts+sysv-rc (init crash fix)
+# HavokOS ISO Builder v2.3
+# Fixed: v2.0 initramfs (gzip), v2.1 sysvinit-core, v2.2 initscripts attempt, v2.3 ship rc/rcS directly
 
 set -ex
 
@@ -12,7 +12,7 @@ CHROOT_DIR="$WORK_DIR/chroot"
 ISO_DIR="$WORK_DIR/iso"
 
 echo "========================================"
-echo "       HavokOS ISO Builder v2.2        "
+echo "       HavokOS ISO Builder v2.3        "
 echo "========================================"
 
 rm -rf "$WORK_DIR" "$OUTPUT_DIR"
@@ -138,15 +138,46 @@ chroot "$CHROOT_DIR" chown -R havok:havok /home/havok/Desktop
 # Step 6: Configure sysvinit and desktop
 echo "[6/9] Configuring sysvinit and desktop..."
 
-# Ensure initscripts are present — these provide /etc/init.d/rc and /etc/init.d/rcS
+# Ensure /etc/init.d/rc and rcS exist — initscripts may fail to create them
+# inside a chroot with policy-rc.d, so we ship our own if needed.
 if [ ! -x "$CHROOT_DIR/etc/init.d/rc" ]; then
-    echo "ERROR: /etc/init.d/rc not found! initscripts package may not have installed correctly."
-    exit 1
+    echo "  NOTE: /etc/init.d/rc missing (initscripts postinst skipped), creating fallback"
+    cat > "$CHROOT_DIR/etc/init.d/rc" << 'RCD'
+#!/bin/sh
+# Minimal /etc/init.d/rc — runs K* then S* scripts in /etc/rc$1.d/
+runlevel=$1
+export RUNLEVEL=$runlevel
+PREVLEVEL=
+[ -r /etc/runlevel.conf ] && . /etc/runlevel.conf
+RC_DIR="/etc/rc${runlevel}.d"
+if [ -d "$RC_DIR" ]; then
+    for script in "$RC_DIR"/K*; do
+        [ -x "$script" ] && "$script" stop 2>/dev/null || true
+    done
+    for script in "$RC_DIR"/S*; do
+        [ -x "$script" ] && "$script" start 2>/dev/null || true
+    done
+fi
+RCD
+    chmod +x "$CHROOT_DIR/etc/init.d/rc"
 fi
 if [ ! -x "$CHROOT_DIR/etc/init.d/rcS" ]; then
-    echo "ERROR: /etc/init.d/rcS not found! initscripts package may not have installed correctly."
-    exit 1
+    echo "  NOTE: /etc/init.d/rcS missing (initscripts postinst skipped), creating fallback"
+    cat > "$CHROOT_DIR/etc/init.d/rcS" << 'RCS'
+#!/bin/sh
+# Minimal /etc/init.d/rcS — runs S* scripts in /etc/rcS.d/
+export RUNLEVEL=S
+export PREVLEVEL=N
+RC_DIR="/etc/rcS.d"
+if [ -d "$RC_DIR" ]; then
+    for script in "$RC_DIR"/S*; do
+        [ -x "$script" ] && "$script" start 2>/dev/null || true
+    done
 fi
+RCS
+    chmod +x "$CHROOT_DIR/etc/init.d/rcS"
+fi
+mkdir -p "$CHROOT_DIR/etc/rc2.d" "$CHROOT_DIR/etc/rcS.d"
 echo "  Verified: /etc/init.d/rc and rcS present"
 
 cat > "$CHROOT_DIR/etc/inittab" << 'INITTAB'
