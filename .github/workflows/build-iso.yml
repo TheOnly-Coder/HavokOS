@@ -44,26 +44,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.0.2 --yes --cleanup-tag 2>/dev/null || true
-          git push origin :refs/tags/v1.0.2 2>/dev/null || true
+          gh release delete v1.0.3 --yes --cleanup-tag 2>/dev/null || true
+          git push origin :refs/tags/v1.0.3 2>/dev/null || true
 
       - name: Create Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.2
-          name: HavokOS v1.0.2
+          tag_name: v1.0.3
+          name: HavokOS v1.0.3
           body: |
-            # HavokOS v1.0.2
+            # HavokOS v1.0.3
             
             A minimal Linux-based desktop OS with built-in HSL (Havok Scripting Library) support.
             
-            ## What's Fixed (v1.0.2)
-            - Fixed "Attempted to kill init!" kernel panic
-            - Replaced systemd-sysv with sysvinit-core (more reliable for live CDs)
-            - Added proper /etc/inittab and /etc/fstab for live environment
-            - Added robust live medium detection script for QEMU CD-ROM
-            - Added console=tty0 for better boot diagnostics
+            ## What's Fixed (v1.0.3)
+            - Fixed mount spam: removed conflicting custom init-premount hook
+              that was pre-mounting /dev/sr0 before live-boot could handle it
+            - Previous fixes retained: sysvinit-core, gzip initramfs, proper inittab
             
             ## Features
             - Lightweight desktop environment (Openbox)

@@ -277,35 +277,6 @@ virtio_blk
 virtio_pci
 MODLIST
 
-# Custom pre-mount script: robust live medium finder
-mkdir -p "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-premount"
-cat > "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-premount/havok-find-live" << 'FINDLIVE'
-#!/bin/sh
-PREREQ=""
-prereqs() { echo "$PREREQ"; }
-case "$1" in
-    prereqs) prereqs; exit 0;;
-esac
-
-log_begin_msg "HavokOS: Scanning for live medium..."
-sleep 1
-mkdir -p /run/live/medium 2>/dev/null || true
-
-for dev in /dev/sr0 /dev/cdrom /dev/sr1 /dev/hdc; do
-    if [ -b "$dev" ]; then
-        log_begin_msg "HavokOS: Trying $dev..."
-        if mount -t iso9660 -o ro "$dev" /run/live/medium 2>/dev/null; then
-            if [ -f /run/live/medium/live/filesystem.squashfs ]; then
-                log_begin_msg "HavokOS: Found live filesystem on $dev"
-                break
-            fi
-            umount /run/live/medium 2>/dev/null
-        fi
-    fi
-done
-FINDLIVE
-chmod +x "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-premount/havok-find-live"
-
 echo "  Generating initramfs..."
 chroot "$CHROOT_DIR" update-initramfs -c -k all
 
