@@ -1,6 +1,6 @@
 #!/bin/bash
-# HavokOS ISO Builder v2.1
-# Fixed: v2.0 initramfs unpacking (gzip), v2.1 init crash (sysvinit + robust live-boot)
+# HavokOS ISO Builder v2.2
+# Fixed: v2.0 initramfs (gzip), v2.1 sysvinit-core, v2.2 initscripts+sysv-rc (init crash fix)
 
 set -ex
 
@@ -12,7 +12,7 @@ CHROOT_DIR="$WORK_DIR/chroot"
 ISO_DIR="$WORK_DIR/iso"
 
 echo "========================================"
-echo "       HavokOS ISO Builder v2.1        "
+echo "       HavokOS ISO Builder v2.2        "
 echo "========================================"
 
 rm -rf "$WORK_DIR" "$OUTPUT_DIR"
@@ -56,6 +56,9 @@ chroot "$CHROOT_DIR" apt-get install -y --no-install-recommends \
     live-boot-initramfs-tools \
     sysvinit-core \
     sysvinit-utils \
+    initscripts \
+    sysv-rc \
+    bootlogd \
     initramfs-tools \
     xserver-xorg-core \
     xserver-xorg-video-vesa \
@@ -134,6 +137,17 @@ chroot "$CHROOT_DIR" chown -R havok:havok /home/havok/Desktop
 
 # Step 6: Configure sysvinit and desktop
 echo "[6/9] Configuring sysvinit and desktop..."
+
+# Ensure initscripts are present — these provide /etc/init.d/rc and /etc/init.d/rcS
+if [ ! -x "$CHROOT_DIR/etc/init.d/rc" ]; then
+    echo "ERROR: /etc/init.d/rc not found! initscripts package may not have installed correctly."
+    exit 1
+fi
+if [ ! -x "$CHROOT_DIR/etc/init.d/rcS" ]; then
+    echo "ERROR: /etc/init.d/rcS not found! initscripts package may not have installed correctly."
+    exit 1
+fi
+echo "  Verified: /etc/init.d/rc and rcS present"
 
 cat > "$CHROOT_DIR/etc/inittab" << 'INITTAB'
 id:2:initdefault:
@@ -339,7 +353,7 @@ TIMEOUT 50
 
 LABEL havokos
     KERNEL /live/vmlinuz
-    APPEND initrd=/live/initrd.img boot=live union=overlay noeject console=tty0 live-media=/dev/sr0
+    APPEND initrd=/live/initrd.img boot=live union=overlay noeject console=tty0
 ISOLINUX
 
 mkdir -p "$ISO_DIR/boot/grub"
@@ -348,7 +362,7 @@ set timeout=10
 set default=0
 
 menuentry "HavokOS" {
-    linux /live/vmlinuz boot=live union=overlay noeject console=tty0 live-media=/dev/sr0
+    linux /live/vmlinuz boot=live union=overlay noeject console=tty0
     initrd /live/initrd.img
 }
 GRUB

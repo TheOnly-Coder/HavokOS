@@ -44,20 +44,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.0.4 --yes --cleanup-tag 2>/dev/null || true
-          git push origin :refs/tags/v1.0.4 2>/dev/null || true
+          gh release delete v1.0.5 --yes --cleanup-tag 2>/dev/null || true
+          git push origin :refs/tags/v1.0.5 2>/dev/null || true
 
       - name: Create Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.4
-          name: HavokOS v1.0.4
+          tag_name: v1.0.5
+          name: HavokOS v1.0.5
           body: |
-            # HavokOS v1.0.4
+            # HavokOS v1.0.5
             
             ## What's Fixed
-            - Added live-media=/dev/sr0 kernel param so live-boot can find the ISO in QEMU
+            - **Critical: Added `initscripts` + `sysv-rc` + `bootlogd` packages** — these provide `/etc/init.d/rc` and `/etc/init.d/rcS` that sysvinit requires to function. Without them, init crashes immediately with "Attempted to kill init!"
+            - Removed restrictive `live-media=/dev/sr0` kernel param — live-boot now auto-detects the live medium
+            - Added build-time verification that rc/rcS scripts exist before proceeding
             - Previous fixes: sysvinit-core, gzip initramfs, no conflicting hooks
             
             ## Features
