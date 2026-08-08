@@ -44,24 +44,21 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.0.3 --yes --cleanup-tag 2>/dev/null || true
-          git push origin :refs/tags/v1.0.3 2>/dev/null || true
+          gh release delete v1.0.4 --yes --cleanup-tag 2>/dev/null || true
+          git push origin :refs/tags/v1.0.4 2>/dev/null || true
 
       - name: Create Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.3
-          name: HavokOS v1.0.3
+          tag_name: v1.0.4
+          name: HavokOS v1.0.4
           body: |
-            # HavokOS v1.0.3
+            # HavokOS v1.0.4
             
-            A minimal Linux-based desktop OS with built-in HSL (Havok Scripting Library) support.
-            
-            ## What's Fixed (v1.0.3)
-            - Fixed mount spam: removed conflicting custom init-premount hook
-              that was pre-mounting /dev/sr0 before live-boot could handle it
-            - Previous fixes retained: sysvinit-core, gzip initramfs, proper inittab
+            ## What's Fixed
+            - Added live-media=/dev/sr0 kernel param so live-boot can find the ISO in QEMU
+            - Previous fixes: sysvinit-core, gzip initramfs, no conflicting hooks
             
             ## Features
             - Lightweight desktop environment (Openbox)

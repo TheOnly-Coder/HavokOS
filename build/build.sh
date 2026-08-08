@@ -339,7 +339,7 @@ TIMEOUT 50
 
 LABEL havokos
     KERNEL /live/vmlinuz
-    APPEND initrd=/live/initrd.img boot=live union=overlay noeject console=tty0
+    APPEND initrd=/live/initrd.img boot=live union=overlay noeject console=tty0 live-media=/dev/sr0
 ISOLINUX
 
 mkdir -p "$ISO_DIR/boot/grub"
@@ -348,7 +348,7 @@ set timeout=10
 set default=0
 
 menuentry "HavokOS" {
-    linux /live/vmlinuz boot=live union=overlay noeject console=tty0
+    linux /live/vmlinuz boot=live union=overlay noeject console=tty0 live-media=/dev/sr0
     initrd /live/initrd.img
 }
 GRUB
