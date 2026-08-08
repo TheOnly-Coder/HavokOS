@@ -6,7 +6,7 @@ Loads HSL files from ~/Desktop/HavokCustom/ and renders the desktop.
 import os, sys, signal, gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
-from gi.repository import Gtk, Gdk, GLib, GObject
+from gi.repository import Gtk, Gdk, GLib, GObject, Pango
 
 sys.path.insert(0, '/usr/share/havok/hsl')
 try:
@@ -239,13 +239,9 @@ class HavokDesktop(Gtk.Window):
 
 if __name__ == '__main__':
     if '--reload' in sys.argv:
-        # Send reload signal to running desktop
         import subprocess
         subprocess.run(['pkill', '-USR1', '-f', 'havok-desktop'])
         print('Reload signal sent to HavokOS Desktop')
     else:
-        # Need Pango for ellipsize
-        gi.require_version('Pango', '1.0')
-        from gi.repository import Pango
         desktop = HavokDesktop()
         Gtk.main()

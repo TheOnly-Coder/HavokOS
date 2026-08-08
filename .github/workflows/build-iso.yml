@@ -44,23 +44,38 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release delete v1.0.5 --yes --cleanup-tag 2>/dev/null || true
-          git push origin :refs/tags/v1.0.5 2>/dev/null || true
-          gh release delete v1.0.6 --yes --cleanup-tag 2>/dev/null || true
-          git push origin :refs/tags/v1.0.6 2>/dev/null || true
+          for ver in v1.0.0 v1.0.1 v1.0.2 v1.0.3 v1.0.4 v1.0.5 v1.0.6 v1.1.0; do
+            gh release delete $ver --yes --cleanup-tag 2>/dev/null || true
+            git push origin :refs/tags/$ver 2>/dev/null || true
+          done
 
       - name: Create Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.6
-          name: HavokOS v1.0.6
+          tag_name: v1.1.0
+          name: HavokOS v1.1.0
           body: |
-            # HavokOS v1.0.6
+            # HavokOS v1.1.0 — Complete Build System Rewrite
             
-            ## What's Fixed
-            - **Critical: /etc/init.d/rc and rcS scripts now shipped directly** — the `initscripts` package postinst fails silently in chroot (policy-rc.d blocks it), so the rc runner scripts were never created. Build script now creates minimal but functional rc/rcS fallback scripts if the package didn't provide them.
-            - Previous fixes: sysvinit-core, gzip initramfs, no conflicting hooks, removed live-media=/dev/sr0
+            ## Root Cause Fix
+            The "Attempted to kill init!" panic was caused by `/sbin/init` pointing to **systemd** instead of sysvinit. The kernel package (`linux-image-amd64`) was installed in the same apt call as `sysvinit-core`, so systemd (installed by debootstrap) remained the init system. Systemd then crashed in the live CD environment (no cgroups/journald in squashfs+overlay).
+            
+            ## What Changed (v3.0 build script)
+            - **sysvinit-core installed FIRST** in a separate apt call before the kernel, so it properly owns `/sbin/init`
+            - **systemd pinned to priority -1** via apt preferences — prevents any package from reinstalling it
+            - **elogind + libpam-elogind** added — provides logind D-Bus API without systemd (needed for polkit, lightdm, NM)
+            - **orphan-sysvinit-scripts** added — fills gaps where packages dropped sysvinit support
+            - **Build verifies `/sbin/init`** is NOT a systemd symlink after all installs
+            - **machine-id cleaned** before squashfs (prevents D-Bus conflicts across boots)
+            - **python3-gi-cairo + gir1.2-gtksource-4** added for HSL syntax highlighting
+            - **procps** added for system monitoring tools
+            
+            ## App Fixes
+            - Browser: fixed Gdk import crash (was imported too late)
+            - Desktop: fixed Pango import crash (was imported too late)
+            - Desktop: HSL interpreter now actually loads (was copied to wrong path)
+            - Settings: replaced systemctl power commands with sysvinit equivalents
             
             ## Features
             - Lightweight desktop environment (Openbox)

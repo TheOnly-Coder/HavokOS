@@ -5,7 +5,7 @@ Havok Browser - A minimal web browser built with WebKit2GTK.
 import sys, os, gi
 gi.require_version('Gtk', '3.0')
 gi.require_version('WebKit2', '4.1')
-from gi.repository import Gtk, WebKit2, GLib, Pango
+from gi.repository import Gtk, WebKit2, GLib, Pango, Gdk
 
 HOME_PAGE = 'https://start.duckduckgo.com/'
 BG_COLOR = '#1a1a2e'
@@ -140,7 +140,6 @@ class HavokBrowser(Gtk.Window):
             self.status_bar.set_text('Loading...')
 
 if __name__ == '__main__':
-    from gi.repository import Gdk
     browser = HavokBrowser()
     browser.connect('destroy', Gtk.main_quit)
     Gtk.main()

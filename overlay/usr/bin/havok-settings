@@ -286,10 +286,9 @@ class HavokSettings(Gtk.Window):
         self.content_box.pack_start(section, False, False, 0)
 
         for label, cmd in [
-            ('Suspend', 'systemctl suspend'),
-            ('Hibernate', 'systemctl hibernate'),
-            ('Restart', 'systemctl reboot'),
-            ('Shut Down', 'systemctl poweroff'),
+            ('Suspend', 'sudo s2ram'),
+            ('Restart', 'sudo shutdown -r now'),
+            ('Shut Down', 'sudo shutdown -h now'),
         ]:
             btn = Gtk.Button(label=label)
             self._style_action_btn(btn)
