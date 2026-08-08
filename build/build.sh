@@ -1,6 +1,6 @@
 #!/bin/bash
-# HavokOS ISO Builder v2.0
-# Fixed: initramfs unpacking failure, proper live-boot integration
+# HavokOS ISO Builder v2.1
+# Fixed: v2.0 initramfs unpacking (gzip), v2.1 init crash (sysvinit + robust live-boot)
 
 set -ex
 
@@ -12,25 +12,19 @@ CHROOT_DIR="$WORK_DIR/chroot"
 ISO_DIR="$WORK_DIR/iso"
 
 echo "========================================"
-echo "       HavokOS ISO Builder v2.0        "
+echo "       HavokOS ISO Builder v2.1        "
 echo "========================================"
 
-# Cleanup
 rm -rf "$WORK_DIR" "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 
-# ============================================================
 # Step 1: Create minimal Debian chroot
-# ============================================================
 echo "[1/9] Creating Debian chroot..."
 mkdir -p "$CHROOT_DIR"
 debootstrap --variant=minbase --arch=amd64 bookworm "$CHROOT_DIR" http://deb.debian.org/debian
 
-# ============================================================
 # Step 2: Configure the chroot
-# ============================================================
 echo "[2/9] Configuring system..."
-
 echo "havokos" > "$CHROOT_DIR/etc/hostname"
 cat > "$CHROOT_DIR/etc/hosts" << 'HOSTS'
 127.0.0.1       havokos localhost
@@ -42,30 +36,26 @@ deb http://deb.debian.org/debian bookworm main contrib non-free-firmware
 deb http://deb.debian.org/debian-security bookworm-security main contrib non-free-firmware
 SOURCES
 
-# Mount filesystems for chroot
 mount --bind /dev "$CHROOT_DIR/dev"
 mount -t proc proc "$CHROOT_DIR/proc"
 mount -t sysfs sysfs "$CHROOT_DIR/sys"
 mount -t devpts devpts "$CHROOT_DIR/dev/pts"
 
-# Prevent daemons from starting during install
 cat > "$CHROOT_DIR/usr/sbin/policy-rc.d" << 'POLICY'
 #!/bin/sh
 exit 101
 POLICY
 chmod +x "$CHROOT_DIR/usr/sbin/policy-rc.d"
 
-# ============================================================
 # Step 3: Install packages
-# ============================================================
 echo "[3/9] Installing packages..."
-
 chroot "$CHROOT_DIR" apt-get update
 chroot "$CHROOT_DIR" apt-get install -y --no-install-recommends \
     linux-image-amd64 \
     live-boot \
     live-boot-initramfs-tools \
-    systemd-sysv \
+    sysvinit-core \
+    sysvinit-utils \
     initramfs-tools \
     xserver-xorg-core \
     xserver-xorg-video-vesa \
@@ -103,20 +93,14 @@ chroot "$CHROOT_DIR" apt-get install -y --no-install-recommends \
     mime-support \
     htop \
     nano \
-    squashfs-tools \
-    xorriso \
-    isolinux \
-    syslinux-common
+    kbd \
+    console-setup
 
-# Set locale
 chroot "$CHROOT_DIR" sh -c 'echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && locale-gen'
 chroot "$CHROOT_DIR" update-locale LANG=en_US.UTF-8
 
-# ============================================================
 # Step 4: Create user and configure autologin
-# ============================================================
 echo "[4/9] Setting up user..."
-
 chroot "$CHROOT_DIR" useradd -m -s /bin/bash -G sudo,netdev,audio,video,plugdev havok
 echo "havok:havokos" | chroot "$CHROOT_DIR" chpasswd
 
@@ -124,46 +108,65 @@ cat > "$CHROOT_DIR/etc/lightdm/lightdm.conf" << 'LIGHTDM'
 [SeatDefaults]
 autologin-user=havok
 autologin-user-timeout=0
-greeter-session=lightdm-gtk-greeter
 user-session=openbox
 LIGHTDM
 
-# ============================================================
 # Step 5: Copy HavokOS overlay
-# ============================================================
 echo "[5/9] Installing HavokOS files..."
-
 cp "$PROJECT_DIR/hsl/interpreter.py" "$CHROOT_DIR/usr/bin/hsl"
 chmod +x "$CHROOT_DIR/usr/bin/hsl"
-
 mkdir -p "$CHROOT_DIR/usr/share/havok/hsl"
 cp -r "$PROJECT_DIR/hsl/stdlib/"* "$CHROOT_DIR/usr/share/havok/hsl/" 2>/dev/null || true
-
 cp "$PROJECT_DIR/overlay/usr/bin/"* "$CHROOT_DIR/usr/bin/" 2>/dev/null || true
 chmod +x "$CHROOT_DIR/usr/bin/havok-"* 2>/dev/null || true
-
 mkdir -p "$CHROOT_DIR/usr/share/applications"
 cp "$PROJECT_DIR/overlay/usr/share/applications/"*.desktop "$CHROOT_DIR/usr/share/applications/" 2>/dev/null || true
-
 cp -r "$PROJECT_DIR/overlay/etc/X11/"* "$CHROOT_DIR/etc/X11/" 2>/dev/null || true
-
 mkdir -p "$CHROOT_DIR/etc/xdg/autostart"
 cp "$PROJECT_DIR/overlay/etc/xdg/autostart/"*.desktop "$CHROOT_DIR/etc/xdg/autostart/" 2>/dev/null || true
 
 mkdir -p "$CHROOT_DIR/etc/skel/Desktop/HavokCustom/IMPORTANT"
-cp "$PROJECT_DIR/overlay/home/havok/Desktop/HavokCustom/IMPORTANT/readme.txt" \
-   "$CHROOT_DIR/etc/skel/Desktop/HavokCustom/IMPORTANT/readme.txt" 2>/dev/null || true
-cp "$PROJECT_DIR/overlay/home/havok/Desktop/HavokCustom/IMPORTANT/"*.hsl \
-   "$CHROOT_DIR/etc/skel/Desktop/HavokCustom/IMPORTANT/" 2>/dev/null || true
-
+cp "$PROJECT_DIR/overlay/home/havok/Desktop/HavokCustom/IMPORTANT/readme.txt" "$CHROOT_DIR/etc/skel/Desktop/HavokCustom/IMPORTANT/readme.txt" 2>/dev/null || true
+cp "$PROJECT_DIR/overlay/home/havok/Desktop/HavokCustom/IMPORTANT/"*.hsl "$CHROOT_DIR/etc/skel/Desktop/HavokCustom/IMPORTANT/" 2>/dev/null || true
 mkdir -p "$CHROOT_DIR/home/havok/Desktop/HavokCustom/IMPORTANT"
 cp -r "$CHROOT_DIR/etc/skel/Desktop/HavokCustom/"* "$CHROOT_DIR/home/havok/Desktop/HavokCustom/" 2>/dev/null || true
 chroot "$CHROOT_DIR" chown -R havok:havok /home/havok/Desktop
 
-# ============================================================
-# Step 6: Configure desktop environment
-# ============================================================
-echo "[6/9] Configuring desktop..."
+# Step 6: Configure sysvinit and desktop
+echo "[6/9] Configuring sysvinit and desktop..."
+
+cat > "$CHROOT_DIR/etc/inittab" << 'INITTAB'
+id:2:initdefault:
+si::sysinit:/etc/init.d/rcS
+l0:0:wait:/etc/init.d/rc 0
+l1:1:wait:/etc/init.d/rc 1
+l2:2:wait:/etc/init.d/rc 2
+l3:3:wait:/etc/init.d/rc 3
+l4:4:wait:/etc/init.d/rc 4
+l5:5:wait:/etc/init.d/rc 5
+l6:6:wait:/etc/init.d/rc 6
+1:2345:respawn:/sbin/getty 38400 tty1
+2:23:respawn:/sbin/getty 38400 tty2
+3:23:respawn:/sbin/getty 38400 tty3
+ca:12345:ctrlaltdel:/sbin/shutdown -t1 -a -r now
+INITTAB
+
+mkdir -p "$CHROOT_DIR/run" "$CHROOT_DIR/var/run" "$CHROOT_DIR/var/lock"
+
+cat > "$CHROOT_DIR/etc/fstab" << 'FSTAB'
+proc    /proc   proc    defaults    0 0
+sysfs   /sys    sysfs   defaults    0 0
+devpts  /dev/pts devpts  defaults    0 0
+tmpfs   /tmp    tmpfs   defaults    0 0
+tmpfs   /run    tmpfs   defaults    0 0
+FSTAB
+
+cat > "$CHROOT_DIR/etc/network/interfaces" << 'INTERFACES'
+auto lo
+iface lo inet loopback
+allow-hotplug eth0
+iface eth0 inet dhcp
+INTERFACES
 
 mkdir -p "$CHROOT_DIR/etc/xdg/openbox"
 cat > "$CHROOT_DIR/etc/xdg/openbox/autostart" << 'AUTOSTART'
@@ -225,13 +228,30 @@ Type=Application
 DesktopNames=HavokOS
 SESSION
 
-# ============================================================
-# Step 7: Build initramfs with live-boot support
-# ============================================================
+cat > "$CHROOT_DIR/etc/rc.local" << 'RCLOCAL'
+#!/bin/sh
+echo "HavokOS rc.local: Starting services..."
+if [ -x /etc/init.d/dbus ]; then
+    /etc/init.d/dbus start 2>/dev/null || true
+fi
+if [ -x /etc/init.d/network-manager ]; then
+    /etc/init.d/network-manager start 2>/dev/null || true
+fi
+if [ -x /etc/init.d/lightdm ]; then
+    /etc/init.d/lightdm start 2>/dev/null || true
+fi
+exit 0
+RCLOCAL
+chmod +x "$CHROOT_DIR/etc/rc.local"
+ln -sf /etc/rc.local "$CHROOT_DIR/etc/rc2.d/S99rc.local" 2>/dev/null || true
+
+chroot "$CHROOT_DIR" update-rc.d lightdm defaults 2>/dev/null || true
+chroot "$CHROOT_DIR" update-rc.d dbus defaults 2>/dev/null || true
+chroot "$CHROOT_DIR" update-rc.d network-manager defaults 2>/dev/null || true
+
+# Step 7: Build initramfs
 echo "[7/9] Building initramfs for live boot..."
 
-# CRITICAL FIX: Use gzip compression (universally reliable)
-# The previous xz -9 -T4 caused "initramfs unpacking failed: write error"
 cat > "$CHROOT_DIR/etc/initramfs-tools/conf.d/havokos.conf" << 'INITCONF'
 MODULES=most
 COMPRESS=gzip
@@ -239,7 +259,6 @@ BUSYBOX=auto
 KEYMAP=n
 INITCONF
 
-# Add modules needed for live boot
 cat > "$CHROOT_DIR/etc/initramfs-tools/modules" << 'MODLIST'
 vfat
 nls_cp437
@@ -254,61 +273,41 @@ uhci_hcd
 ohci_hcd
 ehci_hcd
 xhci_hcd
+virtio_blk
+virtio_pci
 MODLIST
 
-# Verify live-boot hooks are present
-echo "  Verifying live-boot initramfs hooks..."
-if [ ! -d "$CHROOT_DIR/usr/share/initramfs-tools/hooks" ]; then
-    echo "ERROR: initramfs-tools hooks directory missing!"
-    exit 1
-fi
-
-LIVE_HOOK="$CHROOT_DIR/usr/share/initramfs-tools/hooks/live"
-if [ ! -f "$LIVE_HOOK" ]; then
-    echo "WARNING: live-boot hook not found, creating minimal live init..."
-    # Create a minimal live-boot hook
-    cat > "$LIVE_HOOK" << 'LIVEHOOK'
+# Custom pre-mount script: robust live medium finder
+cat > "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-premount/havok-find-live" << 'FINDLIVE'
 #!/bin/sh
-# Minimal live-boot hook for HavokOS
-PREREQ=""
-prereqs() { echo "$PREREQ"; }
-case "$1" in
-    prereqs) prereqs; exit 0;;
-esac
-. /usr/share/initramfs-tools/hook-functions
-copy_file binary /lib/live/boot /bin/live-boot
-LIVEHOOK
-    chmod +x "$LIVE_HOOK"
-fi
-
-# Add a custom live-boot init-bottom script to ensure root is found
-cat > "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-bottom/havok-live" << 'LIVEINIT'
-#!/bin/sh
-# HavokOS live boot helper - runs last in init-bottom
 PREREQ=""
 prereqs() { echo "$PREREQ"; }
 case "$1" in
     prereqs) prereqs; exit 0;;
 esac
 
-# If no root was set by live-boot, try to find the CD-ROM
-if [ -z "${ROOT}" ] || [ "${ROOT}" = "/dev/nfs" ]; then
-    for dev in /dev/sr0 /dev/cdrom /dev/sr1; do
-        if [ -b "$dev" ]; then
-            mkdir -p /run/live/medium
-            mount -t iso9660 -o ro "$dev" /run/live/medium 2>/dev/null && break
+log_begin_msg "HavokOS: Scanning for live medium..."
+sleep 1
+mkdir -p /run/live/medium 2>/dev/null || true
+
+for dev in /dev/sr0 /dev/cdrom /dev/sr1 /dev/hdc; do
+    if [ -b "$dev" ]; then
+        log_begin_msg "HavokOS: Trying $dev..."
+        if mount -t iso9660 -o ro "$dev" /run/live/medium 2>/dev/null; then
+            if [ -f /run/live/medium/live/filesystem.squashfs ]; then
+                log_begin_msg "HavokOS: Found live filesystem on $dev"
+                break
+            fi
             umount /run/live/medium 2>/dev/null
         fi
-    done
-fi
-LIVEINIT
-chmod +x "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-bottom/havok-live"
+    fi
+done
+FINDLIVE
+chmod +x "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-premount/havok-find-live"
 
-# Generate the initramfs
-echo "  Generating initramfs (this may take a minute)..."
+echo "  Generating initramfs..."
 chroot "$CHROOT_DIR" update-initramfs -c -k all
 
-# CRITICAL: Verify initramfs was created and is valid
 echo "  Verifying initramfs..."
 INITRD_PATH=$(ls "$CHROOT_DIR/boot/initrd.img-"* | sort -V | tail -1)
 if [ ! -f "$INITRD_PATH" ]; then
@@ -318,77 +317,49 @@ fi
 INITRD_SIZE=$(stat -c%s "$INITRD_PATH")
 echo "  Initramfs size: $((INITRD_SIZE / 1024)) KB"
 if [ "$INITRD_SIZE" -lt 100000 ]; then
-    echo "ERROR: Initramfs is suspiciously small ($INITRD_SIZE bytes), likely broken"
+    echo "ERROR: Initramfs too small ($INITRD_SIZE bytes)"
     exit 1
 fi
+gzip -t "$INITRD_PATH" 2>/dev/null && echo "  Gzip integrity: OK" || { echo "ERROR: Gzip check failed!"; exit 1; }
 
-# Verify it's a valid gzip file
-if ! gzip -t "$INITRD_PATH" 2>/dev/null; then
-    echo "ERROR: Initramfs gzip integrity check failed!"
-    exit 1
+if (zcat "$INITRD_PATH" | cpio -t 2>/dev/null | grep -q 'live'); then
+    echo "  live-boot scripts in initramfs: OK"
+else
+    echo "  WARNING: No live-boot scripts found in initramfs!"
 fi
 
-# Verify /init exists inside the initramfs
-if ! (zcat "$INITRD_PATH" | cpio -t 2>/dev/null | grep -q '^init$'); then
-    echo "WARNING: /init not found in initramfs, injecting fallback init..."
-    # Create a minimal initramfs overlay with a working /init
-    TMP_INIT="${INITRD_PATH}.fix"
-    (cd "$CHROOT_DIR" && cat << 'CPIOEOF' | cpio -o -H newc 2>/dev/null | gzip -9 >> "$INITRD_PATH"
-init
-CPIOEOF
-    )
-fi
-echo "  Initramfs verified OK"
-
-# Get kernel version
 KERN_VER=$(ls "$CHROOT_DIR/boot/vmlinuz-"* | sort -V | tail -1 | xargs basename | sed 's/vmlinuz-//')
-echo "  Kernel version: $KERN_VER"
+echo "  Kernel: $KERN_VER"
 
-# ============================================================
-# Step 8: Build the ISO filesystem
-# ============================================================
+# Step 8: Build ISO filesystem
 echo "[8/9] Creating ISO filesystem..."
 
-# Unmount chroot before squashfs to avoid locking issues
 umount "$CHROOT_DIR/dev/pts" 2>/dev/null || true
 umount "$CHROOT_DIR/sys" 2>/dev/null || true
 umount "$CHROOT_DIR/proc" 2>/dev/null || true
 umount "$CHROOT_DIR/dev" 2>/dev/null || true
 
-# Create ISO directory structure
+mkdir -p "$CHROOT_DIR/proc" "$CHROOT_DIR/sys" "$CHROOT_DIR/dev" "$CHROOT_DIR/run" "$CHROOT_DIR/tmp"
+
 mkdir -p "$ISO_DIR/live" "$ISO_DIR/boot/isolinux"
 
-# Create squashfs from the chroot
-# Exclude virtual filesystems and kernel (kernel goes in /live/ directly)
-echo "  Creating squashfs (this will take a while)..."
-mksquashfs "$CHROOT_DIR" "$ISO_DIR/live/filesystem.squashfs" \
-    -e boot \
-    -e proc \
-    -e sys \
-    -e dev \
-    -e run \
-    -e tmp \
-    -noappend
+echo "  Creating squashfs..."
+mksquashfs "$CHROOT_DIR" "$ISO_DIR/live/filesystem.squashfs" -e boot -e proc -e sys -e dev -e run -e tmp -noappend
 
-# Copy kernel and initramfs to live directory
 cp "$CHROOT_DIR/boot/vmlinuz-$KERN_VER" "$ISO_DIR/live/vmlinuz"
 cp "$INITRD_PATH" "$ISO_DIR/live/initrd.img"
 
-# Verify files exist
-ls -lh "$ISO_DIR/live/vmlinuz" "$ISO_DIR/live/initrd.img" "$ISO_DIR/live/filesystem.squashfs"
+echo "  Files on ISO:"
+ls -lh "$ISO_DIR/live/"
 
-# ============================================================
-# Step 9: Setup bootloader and create ISO
-# ============================================================
-echo "[9/9] Setting up bootloader and creating ISO..."
+# Step 9: Bootloader and ISO creation
+echo "[9/9] Creating bootable ISO..."
 
-# ISOLINUX for BIOS boot
 cp /usr/lib/ISOLINUX/isolinux.bin "$ISO_DIR/boot/isolinux/"
 cp /usr/lib/syslinux/modules/bios/ldlinux.c32 "$ISO_DIR/boot/isolinux/"
 cp /usr/lib/syslinux/modules/bios/libcom32.c32 "$ISO_DIR/boot/isolinux/"
 cp /usr/lib/syslinux/modules/bios/libutil.c32 "$ISO_DIR/boot/isolinux/"
 
-# CRITICAL FIX: Clean ISOLINUX config with proper kernel params for live-boot
 cat > "$ISO_DIR/boot/isolinux/isolinux.cfg" << 'ISOLINUX'
 DEFAULT havokos
 PROMPT 1
@@ -396,23 +367,20 @@ TIMEOUT 50
 
 LABEL havokos
     KERNEL /live/vmlinuz
-    APPEND initrd=/live/initrd.img boot=live union=overlay noeject
+    APPEND initrd=/live/initrd.img boot=live union=overlay noeject console=tty0
 ISOLINUX
 
-# GRUB config for EFI boot (if needed by xorriso)
 mkdir -p "$ISO_DIR/boot/grub"
 cat > "$ISO_DIR/boot/grub/grub.cfg" << 'GRUB'
 set timeout=10
 set default=0
 
 menuentry "HavokOS" {
-    linux /live/vmlinuz boot=live union=overlay noeject
+    linux /live/vmlinuz boot=live union=overlay noeject console=tty0
     initrd /live/initrd.img
 }
 GRUB
 
-# Create the ISO with isohybrid support (BIOS boot)
-# Use -isohybrid-mbr for BIOS boot support
 echo "  Generating ISO..."
 cd "$ISO_DIR"
 xorriso \
@@ -429,9 +397,6 @@ xorriso \
     -r \
     .
 
-# ============================================================
-# Cleanup and summary
-# ============================================================
 rm -rf "$WORK_DIR"
 
 ISO_SIZE=$(du -h "$OUTPUT_DIR/HavokOS-1.0.0.iso" | cut -f1)
