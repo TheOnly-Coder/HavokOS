@@ -278,6 +278,7 @@ virtio_pci
 MODLIST
 
 # Custom pre-mount script: robust live medium finder
+mkdir -p "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-premount"
 cat > "$CHROOT_DIR/usr/share/initramfs-tools/scripts/init-premount/havok-find-live" << 'FINDLIVE'
 #!/bin/sh
 PREREQ=""
